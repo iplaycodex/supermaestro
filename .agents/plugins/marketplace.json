@@ -1,0 +1,20 @@
+{
+  "name": "supermaestro",
+  "interface": {
+    "displayName": "SuperMaestro"
+  },
+  "plugins": [
+    {
+      "name": "supermaestro",
+      "source": {
+        "source": "local",
+        "path": "./plugins/supermaestro"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Requirement intake and mission-control workflow suite for turning PRD, API, and Lanhu UI materials into reviewable Codex workbenches.",
   "author": {
-    "name": "WYWK Frontend Team"
+    "name": "ALLEN LIU"
   },
   "license": "UNLICENSED",
   "keywords": [
@@ -19,16 +19,16 @@
     "displayName": "SuperMaestro",
     "shortDescription": "需求物料生成与任务编排工作台",
     "longDescription": "SuperMaestro packages a requirement intake workflow for Codex: export Lanhu UI schema materials, structure PRDs into traceable facts, and use mission-control to create source/workbench folders, Gate briefs, review packs, and validation records for medium or large software requirements.",
-    "developerName": "WYWK Frontend Team",
+    "developerName": "ALLEN LIU",
     "category": "Developer Tools",
     "capabilities": [
       "Interactive",
       "Write"
     ],
     "defaultPrompt": [
-      "使用 $requirement-intake 接收这个需求，生成 source 物料和 mission-control workbench，先停在 Gate 1。",
+      "使用 $requirement-workbench 接收这个需求，生成 source 物料和 mission-control workbench，先停在 Gate 1。",
       "使用 $mission-control 处理这个需求，先规划并生成 review pack。",
-      "使用 $export-lanhu-version 从蓝湖链接导出 schema-only UI 物料。"
+      "使用 $lanhu-export 从蓝湖链接导出 schema-only UI 物料。"
     ],
     "brandColor": "#2563EB"
   }

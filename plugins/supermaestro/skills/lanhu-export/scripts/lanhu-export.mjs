@@ -15,7 +15,7 @@ const DEFAULT_COOKIE_FILES = [
 
 function usage() {
   return `Usage:
-  node export-lanhu-version.mjs --url <lanhu-stage-url> --group <group-name> --out <output-dir> [--cookie-file <path>]
+  node lanhu-export.mjs --url <lanhu-stage-url> --group <group-name> --out <output-dir> [--cookie-file <path>]
 
 Options:
   --url                         Lanhu project stage URL with tid and pid.

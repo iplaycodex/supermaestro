@@ -1,0 +1,4 @@
+interface:
+  display_name: "需求工作台"
+  short_description: "整理需求物料并生成 Gate 1 工作台"
+  default_prompt: "使用 $requirement-workbench 接收这个需求，整理 PRD/API/UI 物料，生成 mission-control workbench 并先停在 Gate 1。"

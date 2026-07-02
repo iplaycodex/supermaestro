@@ -1,5 +1,5 @@
 ---
-name: export-lanhu-version
+name: lanhu-export
 description: 用于从蓝湖 Lanhu 项目 stage 链接按版本分组导出设计稿资料。适用于用户提到蓝湖设计稿、Lanhu project/stage 链接、V3.x 版本分组、批量下载设计稿数据、schema、画板清单、按需图片基线时。
 ---
 
@@ -63,7 +63,7 @@ GET https://dds.lanhuapp.com/api/dds/image/store_schema_revise?version_id=<versi
 优先运行 bundled script，避免手写易错接口流程：
 
 ```bash
-node "<skill-dir>/scripts/export-lanhu-version.mjs" \
+node "<skill-dir>/scripts/lanhu-export.mjs" \
   --url "https://lanhuapp.com/web/#/item/project/stage?tid=...&pid=..." \
   --group "v3.9.4 （鱼乐卡改版和话题pk）" \
   --out "documents/v3.9.4 （鱼乐卡改版和话题pk）/ui" \
