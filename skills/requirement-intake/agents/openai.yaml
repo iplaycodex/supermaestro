@@ -1,0 +1,4 @@
+interface:
+  display_name: "需求接收工作台"
+  short_description: "生成需求 source 物料和 Gate 1 工作台"
+  default_prompt: "使用 $requirement-intake 接收这个需求，整理 PRD/API/UI 物料，生成 mission-control workbench 并先停在 Gate 1。"

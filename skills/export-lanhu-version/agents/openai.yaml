@@ -1,0 +1,4 @@
+interface:
+  display_name: "蓝湖版本导出"
+  short_description: "按蓝湖版本分组导出 schema 和画板清单。"
+  default_prompt: "使用 $export-lanhu-version 从这个蓝湖项目链接按版本分组导出设计稿 schema 和画板清单。"
