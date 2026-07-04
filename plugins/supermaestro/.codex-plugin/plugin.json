@@ -1,6 +1,6 @@
 {
   "name": "supermaestro",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Requirement intake and mission-control workflow suite for turning PRD, API, and Lanhu UI materials into reviewable Codex workbenches.",
   "author": {
     "name": "ALLEN LIU"
