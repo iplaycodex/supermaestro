@@ -160,6 +160,15 @@ function approveGate1(workbench, options) {
     throw new Error(`Cannot approve Gate 1 from phase: ${state.phase}`);
   }
 
+  const confirmedBy = String(options.confirmedBy || options.by || '').trim();
+  const confirmationText = String(options.confirmation || '').trim();
+  if (confirmedBy !== 'user') {
+    throw new Error('Gate 1 approval requires --confirmed-by user after explicit user confirmation.');
+  }
+  if (confirmationText.length < 6) {
+    throw new Error('Gate 1 approval requires --confirmation "<用户确认原话或摘要>".');
+  }
+
   checkWorkbench(workbench);
   const nextState = requireState(workbench);
   nextState.phase = 'gate1_approved';
@@ -170,6 +179,14 @@ function approveGate1(workbench, options) {
     worktree: readBoolean(options.worktree, false),
     subagents: readBoolean(options.subagents, false),
     checkpoint: readBoolean(options.checkpoint, false)
+  };
+  nextState.humanConfirmations = {
+    ...(nextState.humanConfirmations || {}),
+    gate1: {
+      confirmedBy,
+      confirmationText,
+      confirmedAt: now()
+    }
   };
   nextState.updatedAt = now();
   saveState(workbench, nextState);
@@ -188,6 +205,9 @@ function checkAction(workbench, options) {
     requireGate(state, 'gate1');
     if (options.ui === 'true' && !options.schemaExtract) {
       throw new Error('UI coding requires --schema-extract.');
+    }
+    if (options.ui === 'true') {
+      validateUiSchemaExtract(workbench, options.schemaExtract);
     }
     console.log('ALLOW code');
     return;
@@ -213,17 +233,26 @@ function verify(workbench, options) {
   state.checks.reviewability = missing.length ? 'failed' : 'passed';
   state.checks.validation = missing.length ? 'failed' : 'passed';
   state.checks.verifyMissing = missing;
+
+  if (missing.length) {
+    state.updatedAt = now();
+    saveState(workbench, state);
+    appendEvent(workbench, 'verify', {
+      strict: readBoolean(options.strict, false),
+      result: 'failed',
+      missing
+    });
+    throw new Error(`Verify failed. Missing or empty: ${missing.join(', ')}`);
+  }
+
+  validateVisualEvidence(workbench, validation);
   state.updatedAt = now();
   saveState(workbench, state);
   appendEvent(workbench, 'verify', {
     strict: readBoolean(options.strict, false),
-    result: missing.length ? 'failed' : 'passed',
+    result: 'passed',
     missing
   });
-
-  if (missing.length) {
-    throw new Error(`Verify failed. Missing or empty: ${missing.join(', ')}`);
-  }
 
   console.log('Verify passed.');
 }
@@ -261,6 +290,49 @@ function requireGate(state, gate) {
   if (state.gates[gate] !== 'approved') {
     throw new Error(`${gate} is not approved.`);
   }
+  if (gate === 'gate1' && !hasGate1HumanConfirmation(state)) {
+    throw new Error(
+      'Gate 1 is approved but missing explicit user confirmation. Re-run approve-gate1 with --confirmed-by user --confirmation "<用户确认原话或摘要>".'
+    );
+  }
+}
+
+function hasGate1HumanConfirmation(state) {
+  const confirmation = state.humanConfirmations && state.humanConfirmations.gate1;
+  return (
+    confirmation &&
+    confirmation.confirmedBy === 'user' &&
+    String(confirmation.confirmationText || '').trim().length >= 6
+  );
+}
+
+function validateUiSchemaExtract(workbench, schemaExtract) {
+  const file = resolveWorkbenchRef(workbench, schemaExtract);
+  if (!hasNonEmptyFile(file)) {
+    throw new Error(`UI schema extract is missing or empty: ${schemaExtract}`);
+  }
+  const content = fs.readFileSync(file, 'utf8');
+  if (!/\|\s*Schema 节点\/路径\s*\|\s*设计值\s*\|\s*代码文件\/组件\/样式选择器\s*\|\s*实现值\s*\|\s*偏差说明\s*\|/i.test(content)) {
+    throw new Error('UI schema extract must include the standard Schema-to-implementation mapping table.');
+  }
+  if (!/资源映射|资源引用|图片图层|image-backed|oss|url\(|https?:\/\//i.test(content)) {
+    throw new Error('UI schema extract must include resource mapping evidence for image-backed nodes.');
+  }
+}
+
+function validateVisualEvidence(workbench, validationRef) {
+  if (!hasUiManifest(workbench)) return;
+  const file = resolveWorkbenchRef(workbench, validationRef);
+  const content = fs.readFileSync(file, 'utf8');
+  const hasVisualEvidence = /(截图|actual|expected|视觉|逐块|人工核对|像素|render|screenshot|ui-review)/i.test(content);
+  const blocked = /visual-validation-blocked|视觉验证阻塞|无法截图|无法启动页面|无法核对/i.test(content);
+  const acceptedSkip = /用户.*(接受|同意|确认).*(跳过|暂不).*视觉|接受跳过视觉|同意跳过视觉/i.test(content);
+  if (!hasVisualEvidence) {
+    throw new Error('Verify failed. UI materials detected, but validation report lacks visual validation evidence.');
+  }
+  if (blocked && !acceptedSkip) {
+    throw new Error('Verify failed. UI visual validation is blocked without explicit user acceptance to skip it.');
+  }
 }
 
 function writeProjection(workbench, state) {
@@ -270,6 +342,7 @@ function writeProjection(workbench, state) {
     phase: state.phase,
     gates: state.gates,
     execution: state.execution,
+    humanConfirmations: state.humanConfirmations || {},
     checks: state.checks,
     recommendedNext: recommendNext(state),
     updatedAt: state.updatedAt
@@ -466,7 +539,7 @@ function printHelp() {
   node scripts/supermaestro.js next <workbench>
   node scripts/supermaestro.js resume <workbench>
   node scripts/supermaestro.js check-workbench <workbench>
-  node scripts/supermaestro.js approve-gate1 <workbench> --mode main-serial --worktree false --subagents false --checkpoint false
+  node scripts/supermaestro.js approve-gate1 <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
   node scripts/supermaestro.js check <workbench> --action code
   node scripts/supermaestro.js verify <workbench> --strict true
   node scripts/supermaestro.js request-gate2 <workbench>

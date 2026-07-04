@@ -29,7 +29,7 @@ description: Use when a medium or large software requirement needs staged planni
 - `workbench/context.md` 是共享上下文和导航页；`workbench/specs/` 只放可实现、可验收、可引用的规格文档。
 - 建立工作台时必须创建或更新标准 Markdown 占位文档，不能只创建目录；即使尚未编码，`reviews/review-packs.md` 和 `reports/validation.md` 也必须记录 pending 状态。
 - 如果发现接口文档、Swagger/OpenAPI、Postman、Mock 数据或后端依赖，必须创建或更新 `specs/api-spec.md`；接口规格是接口封装、mock、联调、异常空态和 API 验证的主事实源。
-- 未经过 Human Gate 1 确认，不创建 worktree、不切分支、不派发子 agent、不开始编码。
+- 未经过 Human Gate 1 确认，不创建 worktree、不切分支、不派发子 agent、不开始编码；`approve-gate1` 必须记录 `--confirmed-by user --confirmation "<用户确认原话或摘要>"`，不能由 agent 自行默认批准。
 - Human Gate 保持三层：Gate 1 确认计划和执行模式，Gate 2 确认 review pack 与验证结果，Gate 3 确认 merge、commit、push 或清理 worktree 等最终危险动作。
 - 未经过 Human Gate 2 确认，不进入最终动作申请；未经过 Human Gate 3 确认，不 merge、不 commit、不 push、不清理 worktree。
 - 不为了使用本技能强制创建多个子 agent；先给出执行档位：主控串行、单 worktree 串行、多个 worktree/子 agent 并发。
@@ -193,7 +193,7 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 Gate 1 确认：
 
 ```bash
-node <skill-dir>/scripts/supermaestro.js approve-gate1 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --worktree <true|false> --subagents <true|false> --checkpoint <true|false>
+node <skill-dir>/scripts/supermaestro.js approve-gate1 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation "<用户确认原话或摘要>" --worktree <true|false> --subagents <true|false> --checkpoint <true|false>
 ```
 
 Gate 2 Review 请求和确认：
@@ -322,7 +322,7 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 - 将生成哪些可选工作台模块；未启用的 worktree/multi-agent 模块不得生成。
 - 推荐确认语必须匹配实际档位，例如：“按推荐继续，foundation 拆小先行，使用项目旁 worktree 隔离，foundation human-approved 后允许本地 checkpoint commit，下游基于 checkpoint commit 创建，每个 worker 完成后开只读 review agent，不自动提交 feature 改动，review 后再决定提交。”；如果不采用 checkpoint commit，必须明确替代的 patch/串行方案和 review 成本。
 
-用户确认后，运行 `approve-gate1` 写入状态；随后只生成当前档位实际需要的可选模块。需要真实 agent、review agent、契约变更或独立集成计划时，必须在 `plans/progress.md` 和 `state.json` 中同步记录。
+用户确认后，运行 `approve-gate1` 写入状态，且必须用 `--confirmation` 保存用户确认原话或摘要；随后只生成当前档位实际需要的可选模块。需要真实 agent、review agent、契约变更或独立集成计划时，必须在 `plans/progress.md` 和 `state.json` 中同步记录。
 
 ### 5. 执行任务
 

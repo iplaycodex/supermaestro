@@ -48,7 +48,7 @@ documents/<需求同名目录>/
 
 ## 边界
 
-- 在获得对应的 `mission-control` Gate 确认前，不要开始编码、创建 worktree、派发子 agent、commit、merge、push 或清理 worktree。
+- 在获得对应的 `mission-control` Gate 确认前，不要开始编码、创建 worktree、派发子 agent、commit、merge、push 或清理 worktree。Gate 1 只能在用户明确确认 Gate 1 Decision Brief 后批准，并必须在命令中记录 `--confirmed-by user --confirmation "<用户确认原话或摘要>"`。
 - 不要把结构化 PRD 中间产物当成唯一事实源；必须保留 `source_ref`，并确保原始 PRD/API/UI 物料可回溯。轻量需求优先把可执行事实写入 `context.md`、`plans/task-plan.md` 和 `plans/progress.md`，避免在 `specs/` 堆放不会被编码直接引用的过程文件。
 - 不要自行发挥 UI 细节。只要存在 `source/ui/manifest.json` 和 `schemas/*.json`，就把 Sketch Data 作为 UI 主事实源，并遵守 `$mission-control` 的 UI 规则。
 - 不要把接口地址当成已确认接口契约；能解析时必须在 Gate 1 前解析并分类公共接口、页面接口和范围外接口，不能留给实现阶段临时发现。

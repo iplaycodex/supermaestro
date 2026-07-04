@@ -35,7 +35,7 @@ Usage:
   node scripts/harness.js resume <requirement-dir> [--json]
   node scripts/harness.js check-workbench <requirement-dir>
   node scripts/harness.js verify <requirement-dir> [--strict true|false]
-  node scripts/harness.js approve-gate1 <requirement-dir> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> [--worktree true|false] [--subagents true|false] [--checkpoint true|false] [--notes <text>]
+  node scripts/harness.js approve-gate1 <requirement-dir> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation <text> [--worktree true|false] [--subagents true|false] [--checkpoint true|false] [--notes <text>]
   node scripts/harness.js request-gate2 <requirement-dir> [--review-pack <path>] [--validation <path>] [--notes <text>] [--force true|false]
   node scripts/harness.js approve-gate2 <requirement-dir> [--review true|false] [--validation true|false] [--notes <text>]
   node scripts/harness.js request-gate3 <requirement-dir> [--notes <text>] [--force true|false]
@@ -149,6 +149,9 @@ function defaultGateDecision(gate) {
       allowCheckpointCommit: null,
       approvedAt: null,
       approvedBy: null,
+      humanConfirmed: false,
+      confirmedBy: null,
+      confirmationText: '',
       notes: ''
     }
   }
@@ -358,6 +361,18 @@ function validationEvidence(dir) {
     warnings.push('reports/validation.md 未发现明显验证证据关键词，请确认不是模板占位。')
   }
 
+  if (hasUiManifest(dir)) {
+    const hasVisualEvidence = /(截图|actual|expected|视觉|逐块|人工核对|像素|render|screenshot|ui-review)/i.test(content)
+    const blocked = /visual-validation-blocked|视觉验证阻塞|无法截图|无法启动页面|无法核对/i.test(content)
+    const acceptedSkip = /用户.*(接受|同意|确认).*(跳过|暂不).*视觉|接受跳过视觉|同意跳过视觉/i.test(content)
+    if (!hasVisualEvidence) {
+      problems.push('检测到 UI 物料，但 reports/validation.md 缺少视觉还原证据。')
+    }
+    if (blocked && !acceptedSkip) {
+      problems.push('UI 视觉验证仍处于 blocked，且没有记录用户接受跳过视觉验收，不能进入 Gate 2。')
+    }
+  }
+
   return { ok: problems.length === 0, problems, warnings }
 }
 
@@ -429,7 +444,7 @@ function recommendNext(dir, state, gate1, gate2, gate3) {
   if (gate1.status !== 'approved') {
     return {
       summary: '输出 Gate 1 Decision Brief，让用户确认计划和执行模式。',
-      command: 'node <skill-dir>/scripts/harness.js approve-gate1 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel>',
+      command: 'node <skill-dir>/scripts/harness.js approve-gate1 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation "<用户确认原话或摘要>"',
       requiresHuman: true,
       blockedBy: []
     }
@@ -742,7 +757,8 @@ function validateSchemaExtractContent(dir, boards, schemas, schemaExtract) {
     { label: '颜色', patterns: [/颜色/, /背景/, /color/, /background/, /#[0-9a-f]{3,8}/i, /rgba?\(/i] },
     { label: '字体', patterns: [/字号/, /字体/, /字重/, /行高/, /font/, /line-height/] },
     { label: '圆角/边框/阴影', patterns: [/圆角/, /边框/, /阴影/, /radius/, /border/, /shadow/] },
-    { label: 'Schema 到实现映射', patterns: [/schema.*实现/i, /实现.*schema/i, /Sketch Data.*实现/i, /实现.*Sketch Data/i, /映射表/, /选择器/, /组件/, /selector/] }
+    { label: 'Schema 到实现映射', patterns: [/schema.*实现/i, /实现.*schema/i, /Sketch Data.*实现/i, /实现.*Sketch Data/i, /映射表/, /选择器/, /组件/, /selector/] },
+    { label: '资源映射', patterns: [/资源映射/, /资源引用/, /图片图层/, /image-backed/i, /oss/i, /url\(/i, /https?:\/\//i] }
   ]
 
   for (const item of requiredEvidence) {
@@ -785,7 +801,19 @@ function validateSchemaExtractContent(dir, boards, schemas, schemaExtract) {
     problems.push('schema 提取仍包含“编码前必须补充/pending”类占位，不能开始 UI 编码')
   }
 
+  if (!/\|\s*Schema 节点\/路径\s*\|\s*设计值\s*\|\s*代码文件\/组件\/样式选择器\s*\|\s*实现值\s*\|\s*偏差说明\s*\|/i.test(content)) {
+    problems.push('schema 提取缺少标准 Schema 到实现映射表表头')
+  }
+
   return problems
+}
+
+function hasGate1HumanConfirmation(gate1) {
+  return (
+    gate1.humanConfirmed === true &&
+    String(gate1.confirmedBy || gate1.approvedBy || '').trim().length > 0 &&
+    String(gate1.confirmationText || '').trim().length >= 6
+  )
 }
 
 function validateGate1(action, gate1) {
@@ -793,6 +821,13 @@ function validateGate1(action, gate1) {
 
   if (gate1.status !== 'approved') {
     deny(action, 'Gate 1 尚未确认；不能开始编码、创建隔离环境或派发实现任务。')
+  }
+
+  if (!hasGate1HumanConfirmation(gate1)) {
+    deny(
+      action,
+      'Gate 1 缺少明确用户确认凭证；请先输出 Gate 1 Decision Brief，并由用户确认后用 approve-gate1 --confirmed-by user --confirmation "<用户确认原话或摘要>" 记录。'
+    )
   }
 
   if (WORKTREE_ACTIONS.has(action) && gate1.allowWorktree !== true) {
@@ -1015,6 +1050,14 @@ function approveGate1(dir, flags) {
   if (!VALID_MODES.has(mode)) {
     throw new Error(`Invalid --mode. Expected one of: ${Array.from(VALID_MODES).join(', ')}`)
   }
+  const confirmedBy = String(flags['confirmed-by'] || flags.by || '').trim()
+  const confirmationText = String(flags.confirmation || '').trim()
+  if (confirmedBy !== 'user') {
+    throw new Error('Gate 1 approval requires --confirmed-by user after explicit user confirmation.')
+  }
+  if (confirmationText.length < 6) {
+    throw new Error('Gate 1 approval requires --confirmation "<用户确认原话或摘要>".')
+  }
 
   const defaultWorktree = mode !== 'main-serial'
   const defaultSubagents = mode === 'multi-worktree-parallel'
@@ -1034,7 +1077,10 @@ function approveGate1(dir, flags) {
     allowSubagents,
     allowCheckpointCommit,
     approvedAt,
-    approvedBy: flags.by || 'user',
+    approvedBy: confirmedBy,
+    humanConfirmed: true,
+    confirmedBy,
+    confirmationText,
     notes: flags.notes || ''
   })
   saveState(p, {

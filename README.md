@@ -81,7 +81,7 @@ node plugins/supermaestro/scripts/supermaestro.js init <workbench> --name "<需�
 node plugins/supermaestro/scripts/supermaestro.js status <workbench>
 node plugins/supermaestro/scripts/supermaestro.js next <workbench>
 node plugins/supermaestro/scripts/supermaestro.js check-workbench <workbench>
-node plugins/supermaestro/scripts/supermaestro.js approve-gate1 <workbench> --mode main-serial
+node plugins/supermaestro/scripts/supermaestro.js approve-gate1 <workbench> --mode main-serial --confirmed-by user --confirmation "<用户确认原话或摘要>"
 node plugins/supermaestro/scripts/supermaestro.js verify <workbench> --strict true
 node plugins/supermaestro/scripts/supermaestro.js request-gate2 <workbench>
 ```
