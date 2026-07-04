@@ -18,6 +18,7 @@
 | PRD | ../source/prd/ |  |  |
 | API | specs/api-spec.md |  |  |
 | UI | specs/ui-schema-extract.md |  |  |
+| 页面契约矩阵 | specs/page-contract-matrix.md |  |  |
 | 共享上下文 | context.md |  |  |
 
 ## 范围
@@ -70,6 +71,8 @@
 
 - 推荐选择：
 - 必须确认：
+- API Discovery：complete / partial / blocked；真实接口清单和公共/页面归属是否已确认
+- 页面契约矩阵：complete / partial / not-needed；页面、UI 画板/schema、API/mock、RP 是否一一绑定
 - 选择影响：
 - Review 成本：
 - Foundation Checkpoint：拆分、放行条件、checkpoint commit 和下游 base

@@ -111,7 +111,8 @@ documents/<需求同名目录>/
     │   ├── material-index.md
     │   ├── api-spec.md
     │   ├── ui-material-index.md
-    │   └── ui-schema-extract.md
+    │   ├── ui-schema-extract.md
+    │   └── page-contract-matrix.md   # 同时存在 API + UI 物料时必填
     ├── plans/
     │   ├── task-plan.md
     │   └── progress.md
@@ -188,7 +189,7 @@ Gate 1 前工作台完整性检查：
 node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 ```
 
-`check-workbench` 会检查标准工作台文档是否存在且非空；共享上下文优先检查 `workbench/context.md`，并兼容旧路径 `specs/context.md`；存在接口/API/mock 物料时，还会检查 `specs/api-spec.md`；存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json` 时，还会检查 `specs/ui-material-index.md` 和 `specs/ui-schema-extract.md`。缺少 `plans/progress.md` 等文件时必须先补齐占位文档，不能进入 Gate 1。
+`check-workbench` 会检查标准工作台文档是否存在且非空；共享上下文优先检查 `workbench/context.md`，并兼容旧路径 `specs/context.md`；存在接口/API/mock 物料时，还会检查 `specs/api-spec.md`；存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json` 时，还会检查 `specs/ui-material-index.md` 和 `specs/ui-schema-extract.md`；同时存在 API 和 UI 物料时，还会检查 `specs/page-contract-matrix.md`。缺少 `plans/progress.md` 等文件时必须先补齐占位文档，不能进入 Gate 1。
 
 Gate 1 确认：
 
@@ -259,9 +260,10 @@ node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 - 扫描 PRD、接口文档、UI 资料、切图、截图和用户补充说明；读取原始物料时使用 `../source/...` 相对路径。
 - 在 `workbench/` 初始化 SuperMaestro CLI；初始化后必须生成或刷新 `state.json`、`events.jsonl` 和 `mission.state.json`。
 - 生成 `specs/material-index.md`：参考 `templates/context-template.md` 的事实源结构，记录已发现物料、缺失物料、事实源和待确认项。
-- 如果存在接口文档、Swagger/OpenAPI、Postman、Mock 数据或后端依赖，生成或更新 `specs/api-spec.md`：沉淀接口清单、入参、出参、数据模型、页面/任务映射、mock 场景、异常空态和待确认项。
+- 如果存在接口文档、Swagger/OpenAPI、Postman、Mock 数据或后端依赖，生成或更新 `specs/api-spec.md`：沉淀接口清单、入参、出参、数据模型、页面/任务映射、mock 场景、异常空态和待确认项。若原始物料是接口文档地址，Gate 1 前必须先尝试解析真实接口清单并记录 API Discovery：Knife4j/Swagger 优先读取 OpenAPI JSON，必要时尝试 `swagger-resources`、`/v3/api-docs`、`/v2/api-docs`；无法访问时明确 blocked/partial 和继续规划风险。
 - 如果存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json`，运行 `scripts/inspect-ui.js <需求工作台> --write-index true`。
 - 如果存在 `../source/ui/schemas/*.json`，必须创建或更新 `specs/ui-schema-extract.md`，并按画板写入节点级 Sketch Data 提取结果和 Schema 到实现映射表占位；图片缺失时记录 `schema-only`，不得把图片缺失记为可以跳过 UI 还原。
+- 如果同时存在 API 物料和 UI 物料，生成或更新 `specs/page-contract-matrix.md`：按页面/模块绑定 PRD source_ref、UI 画板/schema、API/mock、公共契约、Review Pack 和阻塞项；没有页面契约矩阵不得把多页面需求推进到 Gate 1。
 - 生成或更新根目录 `context.md`：使用 `templates/context-template.md`，沉淀 PRD 摘要、业务规则、技术上下文、UI 契约、任务依赖、风险假设和验证计划。多 agent、worktree、长流程恢复前必须先读这份共享上下文。
 - 生成或更新 `plans/progress.md`：使用 `templates/progress-template.md`，先写当前阶段、任务状态表、进度日志、阻塞决策和验证进展；不要把动态任务状态只写在 `task-plan.md`。
 - 生成或更新 `reviews/review-packs.md`：使用 `templates/review-packs-template.md`，先写每个 RP 的审查目标、预期 artifact、建议审查顺序和 pending 验证；不要复制长文件清单或重复 progress 状态。
@@ -280,6 +282,7 @@ node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 - 关键事实源和待确认问题。
 - 接口规格路径和关键接口风险；详细接口表放 `specs/api-spec.md`。
 - UI 画板/schema 范围和 schema-only 策略；节点级提取和映射表放 `specs/ui-schema-extract.md`。必须写明最终画板绑定证据：用户/截图标题、manifest 画板名、schema 文件名、根尺寸和关键节点是否一致；存在 `版本2`、备份稿、状态稿或同名近似稿时，列为待确认或阻塞项。
+- 页面契约矩阵路径和覆盖健康度；同时存在 API + UI 物料时，把页面/模块、PRD source_ref、UI 画板/schema、API/mock 和 RP 绑定关系放在 `specs/page-contract-matrix.md`，`task-plan.md` 只写摘要和关键风险。
 - UI 资源策略：列出用户提供的 OSS 前缀、本地切图目录、Sketch Data 图片节点和资源引用清单；强视觉区域计划用图片还是 CSS 必须在计划中写清。无法确认资源时，不得把该 UI 任务列为可直接编码。
 - 任务 DAG：基础任务、功能切片、审查任务、集成任务。
 - 公共依赖和 Foundation Review Checkpoint：列明哪些 foundation 任务会解锁多个页面/功能切片、对应 review pack、验收标准、被阻塞的下游任务，以及用户确认前不得启动的范围。
@@ -306,6 +309,8 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 
 - 当前推荐执行档位。
 - 当前阶段、任务状态和阻塞项摘要。
+- API Discovery 状态：真实接口清单是否已解析、公共/页面/范围外接口是否已分类，哪些接口仍是推断。
+- 页面契约矩阵状态：每个页面/模块是否已绑定 PRD、UI、API/mock 和 RP；缺口是否阻塞。
 - UI 资料包健康状态和是否阻塞。
 - UI 最终画板绑定状态：截图/用户描述中的画板名是否与 manifest/schema 完全匹配；是否存在同名旧稿、备份稿、版本稿；若不匹配，必须请求用户确认或重新导出，不能继续编码。
 - UI 资源映射状态：强视觉节点需要的 OSS/本地切图是否已清单化；是否存在待确认资源名或只能推断的资源路径。

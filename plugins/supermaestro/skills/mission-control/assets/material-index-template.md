@@ -19,6 +19,7 @@
 | 进度同步 | plans/progress.md | 动态任务状态和阻塞项 | pending |  |
 | 接口文档 | ../source/api/ | API 契约 | pending |  |
 | 接口规格 | specs/api-spec.md | 接口封装/mock/联调主事实源 | pending | 有接口/API/mock 物料时必填 |
+| 页面契约矩阵 | specs/page-contract-matrix.md | 页面、UI、API/mock、RP 绑定关系 | pending | 同时存在 API + UI 物料时必填 |
 | Mock 数据 |  | 本地联调/验收 | pending |  |
 | UI 设计稿 | ../source/ui/ | 视觉和交互 | pending |  |
 | UI 导出包 manifest | ../source/ui/manifest.json | 画板/schema_path 索引 | pending | 标准物料为 manifest + schemas，图片可不存在 |
@@ -41,6 +42,7 @@
 - UI 主事实源：../source/ui/schemas/*.json
 - 接口主事实源：
 - 接口规格：
+- 页面契约矩阵：
 - Mock 主事实源：
 
 ## 接口资料摘要

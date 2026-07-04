@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 
 const WORKFLOW_VERSION = 1;
+const GENERATED_WORKBENCH_DIRS = new Set(['gates', 'plans', 'reports', 'reviews', 'specs', 'ui', 'workbench']);
+const API_MATERIAL_NAME_RE = /(api|swagger|openapi|postman|mock|interface|interfaces|接口|后端|联调|knife4j)/i;
 const DEFAULT_STATE = {
   phase: 'initialized',
   gates: {
@@ -128,23 +130,21 @@ function resume(workbench) {
 
 function checkWorkbench(workbench) {
   const state = requireState(workbench);
-  const required = [
-    'context.md',
-    'plans/task-plan.md',
-    'plans/progress.md',
-    'reviews/review-packs.md',
-    'reports/validation.md'
-  ];
-  const missing = required.filter(file => !hasNonEmptyFile(path.join(workbench, file)));
+  const required = requiredWorkbenchFiles(workbench);
+  const missing = required.filter(file => !hasNonEmptyFile(resolveWorkbenchRef(workbench, file)));
+  const missingAlternatives = requiredWorkbenchAlternatives(workbench)
+    .filter(entry => !entry.refs.some(ref => hasNonEmptyFile(resolveWorkbenchRef(workbench, ref))))
+    .map(entry => entry.label);
+  const allMissing = missing.concat(missingAlternatives);
 
-  state.checks.workbench = missing.length ? 'failed' : 'passed';
-  state.checks.workbenchMissing = missing;
+  state.checks.workbench = allMissing.length ? 'failed' : 'passed';
+  state.checks.workbenchMissing = allMissing;
   state.updatedAt = now();
   saveState(workbench, state);
-  appendEvent(workbench, 'check-workbench', { result: state.checks.workbench, missing });
+  appendEvent(workbench, 'check-workbench', { result: state.checks.workbench, missing: allMissing });
 
-  if (missing.length) {
-    throw new Error(`Workbench check failed. Missing or empty: ${missing.join(', ')}`);
+  if (allMissing.length) {
+    throw new Error(`Workbench check failed. Missing or empty: ${allMissing.join(', ')}`);
   }
 
   console.log('Workbench check passed.');
@@ -343,6 +343,107 @@ function readBoolean(value, fallback) {
 
 function hasNonEmptyFile(file) {
   return fs.existsSync(file) && fs.statSync(file).isFile() && fs.readFileSync(file, 'utf8').trim().length > 0;
+}
+
+function requiredWorkbenchFiles(workbench) {
+  const files = [
+    'plans/task-plan.md',
+    'plans/progress.md',
+    'reviews/review-packs.md',
+    'reports/validation.md'
+  ];
+
+  if (hasApiMaterial(workbench)) files.push('specs/api-spec.md');
+
+  if (hasUiManifest(workbench)) {
+    files.push('specs/ui-material-index.md');
+    files.push('specs/ui-schema-extract.md');
+  }
+
+  if (needsPageContractMatrix(workbench)) {
+    files.push('specs/page-contract-matrix.md');
+  }
+
+  return files;
+}
+
+function requiredWorkbenchAlternatives(workbench) {
+  const alternatives = [
+    {
+      label: 'context.md',
+      refs: ['context.md', 'specs/context.md']
+    }
+  ];
+
+  if (hasUiManifest(workbench)) {
+    alternatives.push({
+      label: 'UI manifest',
+      refs: ['ui/manifest.json', '../source/ui/manifest.json', '../input/ui/manifest.json']
+    });
+  }
+
+  return alternatives;
+}
+
+function needsPageContractMatrix(workbench) {
+  return hasApiMaterial(workbench) && hasUiManifest(workbench);
+}
+
+function hasApiMaterial(workbench) {
+  return scanApiMaterial(workbench) || sourceCandidateDirs(workbench).some(candidate => scanApiMaterial(candidate));
+}
+
+function scanApiMaterial(rootDir) {
+  if (!fs.existsSync(rootDir)) return false;
+
+  const scan = (currentDir, depth) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+
+    for (const entry of entries) {
+      const name = entry.name;
+      const lowerName = name.toLowerCase();
+      if (name.startsWith('.') || GENERATED_WORKBENCH_DIRS.has(lowerName)) continue;
+      if (API_MATERIAL_NAME_RE.test(name)) return true;
+
+      if (entry.isDirectory() && depth < 2) {
+        if (scan(path.join(currentDir, name), depth + 1)) return true;
+      }
+    }
+
+    return false;
+  };
+
+  return scan(rootDir, 0);
+}
+
+function hasUiManifest(workbench) {
+  return (
+    fs.existsSync(path.join(workbench, 'ui', 'manifest.json')) ||
+    sourceCandidateDirs(workbench).some(candidate => fs.existsSync(path.join(candidate, 'ui', 'manifest.json')))
+  );
+}
+
+function sourceCandidateDirs(workbench) {
+  const root = requirementRoot(workbench);
+  const candidates = [path.join(root, 'source'), path.join(root, 'input')];
+  return candidates.filter((entry, index, list) => list.indexOf(entry) === index);
+}
+
+function requirementRoot(workbench) {
+  if (path.basename(workbench) === 'workbench') return path.dirname(workbench);
+  return workbench;
+}
+
+function resolveWorkbenchRef(workbench, ref) {
+  const clean = String(ref || '').split('#')[0].trim();
+  if (!clean) return '';
+  if (path.isAbsolute(clean)) return clean;
+  return path.join(workbench, clean);
 }
 
 function writeJson(file, value) {

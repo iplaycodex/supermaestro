@@ -676,6 +676,10 @@ function requiredWorkbenchFiles(dir) {
     files.push(path.join('specs', 'ui-schema-extract.md'))
   }
 
+  if (needsPageContractMatrix(dir)) {
+    files.push(path.join('specs', 'page-contract-matrix.md'))
+  }
+
   return files
 }
 
@@ -872,6 +876,10 @@ function hasUiManifest(dir) {
     fs.existsSync(path.join(dir, 'ui', 'manifest.json')) ||
     sourceCandidateDirs(dir).some(candidate => fs.existsSync(path.join(candidate, 'ui', 'manifest.json')))
   )
+}
+
+function needsPageContractMatrix(dir) {
+  return hasApiMaterial(dir) && hasUiManifest(dir)
 }
 
 function validateCodeMode(dir, flags) {

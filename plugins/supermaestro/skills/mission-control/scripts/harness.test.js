@@ -61,4 +61,36 @@ assert.strictEqual(result.status, 0, result.stdout + result.stderr)
 state = JSON.parse(result.stdout)
 assert.match(state.nextAction.command, /approve-gate2/)
 
+const matrixRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-harness-matrix-'))
+const matrixWb = path.join(matrixRoot, '需求A', 'workbench')
+result = run(['init', matrixWb, '--name', '矩阵需求'], matrixRoot)
+assert.strictEqual(result.status, 0, result.stderr)
+
+write(path.join(matrixRoot, '需求A', 'source', 'api', '接口文档.md'), '# 接口文档\n')
+write(path.join(matrixRoot, '需求A', 'source', 'ui', 'manifest.json'), '{"boards":[]}\n')
+write(path.join(matrixWb, 'context.md'), '# 上下文\n\n已整理。\n')
+write(path.join(matrixWb, 'specs', 'material-index.md'), '# 物料索引\n\n有 API/UI 物料。\n')
+write(path.join(matrixWb, 'specs', 'api-spec.md'), '# API 规格\n\n已整理。\n')
+write(path.join(matrixWb, 'specs', 'ui-material-index.md'), '# UI 物料索引\n\n已整理。\n')
+write(path.join(matrixWb, 'specs', 'ui-schema-extract.md'), '# UI Schema 提取\n\n已整理。\n')
+write(path.join(matrixWb, 'plans', 'task-plan.md'), '# 任务计划\n\n### RP-P1-demo\n')
+write(path.join(matrixWb, 'plans', 'progress.md'), '# 进度同步\n\n')
+write(path.join(matrixWb, 'reviews', 'review-packs.md'), '# 审查包\n\n### RP-P1-demo\n')
+write(path.join(matrixWb, 'reports', 'validation.md'), [
+  '# 验证报告',
+  '',
+  '| 验证项 | 类型 | 状态 | 证据/备注 |',
+  '| --- | --- | --- | --- |',
+  '| 工作台检查 | static | passed | PASS 示例检查通过 |',
+  '',
+].join('\n'))
+
+result = run(['check-workbench', matrixWb], matrixRoot)
+assert.notStrictEqual(result.status, 0, 'API+UI workbench should require page-contract-matrix.md')
+assert.match(result.stderr, /page-contract-matrix\.md/)
+
+write(path.join(matrixWb, 'specs', 'page-contract-matrix.md'), '# 页面契约矩阵\n\n已整理。\n')
+result = run(['check-workbench', matrixWb], matrixRoot)
+assert.strictEqual(result.status, 0, result.stdout + result.stderr)
+
 console.log('PASS harness tests')
