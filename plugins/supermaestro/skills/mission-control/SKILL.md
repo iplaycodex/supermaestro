@@ -7,6 +7,14 @@ description: Use when a medium or large software requirement needs staged planni
 
 把一个中大型需求转成可审查、可暂停、可恢复的研发流程。主控负责上下文、任务边界、Gate 决策、进度和集成；子 agent 只执行任务卡限定的工作。
 
+## 规范化分层
+
+- 先读取插件内 `profiles/core-workflow.md`，把它作为 Gate、状态、review 和 validation 的核心规则。
+- 当目标项目是 Taro 小程序/H5 且存在蓝湖 schema 物料时，再读取 `profiles/weapp-taro-lanhu.md`；不要把领域规则当成 core workflow。
+- 机器状态优先由 `scripts/supermaestro.js` 维护：`state.json` 是当前 workflow 状态，`events.jsonl` 是追加事件日志，`mission.state.json` 是 resume/next 投影。
+- Markdown 工作台文件仍然必须维护，但它们是人类审阅投影和交付证据，不应作为唯一机器状态源。
+- 关键动作必须优先通过脚本检查；如果脚本拒绝动作，停止并向用户报告原因，不要只靠 prompt 规则继续执行。
+
 ## 核心原则
 
 - 默认先规划，除非用户明确要求立刻实现。
@@ -14,8 +22,7 @@ description: Use when a medium or large software requirement needs staged planni
 - 使用 `documents/<需求同名目录>/` 作为需求根目录；其中 `source/` 放用户提供的原始开发物料，`workbench/` 放本技能生成和维护的工作台文档。用户直接指定旧式工作台目录或旧版 `input/` 物料目录时，保持兼容。
 - 拆任务前先读取仓库规则、当前分支、PRD、设计稿、mock/API、UI 导出包和相关代码。
 - 默认轻量工作台：只生成当前需求必需的文档。流程文档的维护成本不得接近或超过编码成本；如果一个需求预计编码小于 1 天，核心工作台应优先控制在 6-8 个 Markdown/JSON 文件内。
-- 任务状态单一事实源：任务状态、Owner、阻塞、review artifact、下一步只维护在 `workbench/plans/progress.md`。`harness.json` / `harness.state.json` 只记录 Gate 状态和 UI 体检摘要，不维护任务 CRUD；不要再创建 `tasks/state.json` 这类平行状态源。
-- `workbench/mission.state.json` 是由 harness 生成的流程恢复摘要，只记录当前 phase、执行档位、Gate 状态、最终动作授权和推荐下一步；它服务于 `status` / `next` / `resume`，不得手写任务 CRUD，也不得替代 `plans/progress.md`。
+- 任务状态对人类审阅时同步到 `workbench/plans/progress.md`；机器状态以 `workbench/state.json` 和 `workbench/events.jsonl` 为准。`mission.state.json` 只记录恢复摘要，不得手写任务 CRUD。
 - 主控工作台是唯一全局状态写入点：编码 worker 和 review agent 可以读取共享上下文，但不得直接更新主控工作台的 `plans/progress.md`、`agents/agent-index.md`、`worktrees/plan.md`、`reviews/review-packs.md` 或 `reports/validation.md`。worker 只在自己的 worktree 写 `workbench/agents/<task-id>/handoff.md` 和任务验证记录；review agent 只写 `reviews/code-review/<RP>.md`。主控读取这些产物后 fan-in 回主工作台。
 - `workbench/plans/task-plan.md` 保持短计划，只写范围、DAG、依赖、执行模式、review 顺序和验证策略；不要重复 `api-spec.md` 的接口表、`ui-schema-extract.md` 的 UI 映射表或 `progress.md` 的动态状态。
 - `workbench/plans/progress.md` 记录动态进度、当前任务、阻塞项、进度日志、review artifact 和验证进展。
@@ -42,7 +49,7 @@ description: Use when a medium or large software requirement needs staged planni
 - 预计命中复杂度阈值（多页面、多画板、公共组件/接口/路由、超过 8 个文件、同时新增和改造页面）时，不推荐 `main-serial + checkpoint=false`；如用户仍选择，Gate 1 Brief 必须明确 review 成本并安排 per-RP patch。
 - 验证必须按风险分级，不能把 parser、formatter、`git diff --check` 当成行为验证。页面/组件任务至少要尝试可运行的页面级构建、聚焦测试、渲染/截图、mock 链路或路由检查；无法执行时必须写清真实阻塞和剩余风险。
 - Gate 2 前必须输出人可执行的 review brief：按顺序列出要 review 的 RP、每个 RP 的 diff 命令、涉及文件、验证证据和未验证风险。不要只让用户翻工作台文档。
-- 长流程恢复或换线程后，先运行 `harness.js resume <需求工作台>`，用 `mission.state.json` 的推荐下一步恢复上下文；不要只靠记忆猜当前阶段。
+- 长流程恢复或换线程后，先运行 `supermaestro.js resume <需求工作台>`，用 `state.json` 和 `mission.state.json` 恢复上下文；不要只靠记忆猜当前阶段。
 - 除非用户明确授权，不要擅自 commit、merge、push、清理 worktree 或回滚用户改动。
 
 ## UI 硬规则
@@ -67,13 +74,13 @@ description: Use when a medium or large software requirement needs staged planni
 - UI 编码前运行 harness 闸门：
 
 ```bash
-node <skill-dir>/scripts/harness.js check <需求工作台> --action code --ui true --boards "<画板名>" --schemas "../source/ui/schemas/<file>.json" --schema-extract "specs/ui-schema-extract.md" --baselines "../source/ui/images/<file>.png"
+node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action code --ui true --boards "<画板名>" --schemas "../source/ui/schemas/<file>.json" --schema-extract "specs/ui-schema-extract.md" --baselines "../source/ui/images/<file>.png"
 ```
 
 图片已删除或不提供基线图时，显式使用 schema-only：
 
 ```bash
-node <skill-dir>/scripts/harness.js check <需求工作台> --action code --ui true --schema-only true --boards "<画板名>" --schemas "../source/ui/schemas/<file>.json" --schema-extract "specs/ui-schema-extract.md"
+node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action code --ui true --schema-only true --boards "<画板名>" --schemas "../source/ui/schemas/<file>.json" --schema-extract "specs/ui-schema-extract.md"
 ```
 
 新结构下 `<需求工作台>` 通常是 `documents/<需求同名目录>/workbench`，UI 路径使用 `../source/ui/schemas/<file>.json` 和可选的 `../source/ui/images/<file>.png`。旧式 `../input/ui/...` 和 `ui/...` 路径仍兼容。
@@ -92,9 +99,9 @@ documents/<需求同名目录>/
 │       ├── schemas/
 │       └── images/         # 可选；未来可不存在
 └── workbench/
-    ├── harness.json
-    ├── harness.state.json
-    ├── mission.state.json  # harness 生成的恢复/下一步摘要；不要手写任务状态
+    ├── state.json          # SuperMaestro CLI 维护的机器状态
+    ├── events.jsonl        # append-only 流程事件
+    ├── mission.state.json  # resume/next 投影；不要手写任务状态
     ├── context.md
     ├── gates/
     │   ├── gate-1-decision.json
@@ -133,12 +140,12 @@ workbench/
 
 ## Harness 用法
 
-Harness 只做三件事：初始化 Gate 状态、记录 Gate 确认、执行 UI/Gate 闸门检查。
+Harness / SuperMaestro CLI 只做三件事：初始化机器状态、记录 Gate 确认、执行 UI/Gate/验证闸门检查。
 
 初始化：
 
 ```bash
-node <skill-dir>/scripts/harness.js init <需求工作台> --name "<需求名>"
+node <skill-dir>/scripts/supermaestro.js init <需求工作台> --name "<需求名>"
 ```
 
 新结构中 `<需求工作台>` 是：
@@ -158,27 +165,27 @@ node <skill-dir>/scripts/inspect-ui.js <需求工作台> --write-index true
 查看状态：
 
 ```bash
-node <skill-dir>/scripts/harness.js status <需求工作台>
+node <skill-dir>/scripts/supermaestro.js status <需求工作台>
 ```
 
 查看推荐下一步：
 
 ```bash
-node <skill-dir>/scripts/harness.js next <需求工作台>
+node <skill-dir>/scripts/supermaestro.js next <需求工作台>
 ```
 
 恢复长流程上下文：
 
 ```bash
-node <skill-dir>/scripts/harness.js resume <需求工作台>
+node <skill-dir>/scripts/supermaestro.js resume <需求工作台>
 ```
 
-`next` / `resume` 会刷新 `mission.state.json`，输出当前阶段、三层 Gate 状态、推荐下一步、建议命令、是否需要人工确认和阻塞项。它只做流程导航，不替代 `plans/progress.md` 的任务状态。
+`next` / `resume` 会刷新 `mission.state.json`，输出当前阶段、三层 Gate 状态、推荐下一步、建议命令、是否需要人工确认和阻塞项。它只做流程导航，不替代 `state.json` 和 `events.jsonl`。
 
 Gate 1 前工作台完整性检查：
 
 ```bash
-node <skill-dir>/scripts/harness.js check-workbench <需求工作台>
+node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 ```
 
 `check-workbench` 会检查标准工作台文档是否存在且非空；共享上下文优先检查 `workbench/context.md`，并兼容旧路径 `specs/context.md`；存在接口/API/mock 物料时，还会检查 `specs/api-spec.md`；存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json` 时，还会检查 `specs/ui-material-index.md` 和 `specs/ui-schema-extract.md`。缺少 `plans/progress.md` 等文件时必须先补齐占位文档，不能进入 Gate 1。
@@ -186,50 +193,48 @@ node <skill-dir>/scripts/harness.js check-workbench <需求工作台>
 Gate 1 确认：
 
 ```bash
-node <skill-dir>/scripts/harness.js approve-gate1 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --worktree <true|false> --subagents <true|false> --checkpoint <true|false>
+node <skill-dir>/scripts/supermaestro.js approve-gate1 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --worktree <true|false> --subagents <true|false> --checkpoint <true|false>
 ```
 
 Gate 2 Review 请求和确认：
 
 ```bash
-node <skill-dir>/scripts/harness.js request-gate2 <需求工作台> --review-pack reviews/review-packs.md --validation reports/validation.md
-node <skill-dir>/scripts/harness.js approve-gate2 <需求工作台> --review true --validation true
+node <skill-dir>/scripts/supermaestro.js request-gate2 <需求工作台> --review-pack reviews/review-packs.md --validation reports/validation.md
 ```
 
-Gate 3 最终动作请求和确认：
+Gate 3 最终动作请求和确认（当前脚本只提供 `check --action commit|merge|push|cleanup` 护栏；正式 approve-gate3 后续补齐前，不要自动执行最终动作）：
 
 ```bash
-node <skill-dir>/scripts/harness.js request-gate3 <需求工作台>
-node <skill-dir>/scripts/harness.js approve-gate3 <需求工作台> --merge <true|false> --commit <true|false> --push <true|false> --cleanup <true|false>
+node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action commit
 ```
 
 危险动作前检查：
 
 ```bash
-node <skill-dir>/scripts/harness.js check <需求工作台> --action code --non-ui true --reason "只改接口或非视觉逻辑"
-node <skill-dir>/scripts/harness.js check <需求工作台> --action commit
-node <skill-dir>/scripts/harness.js check <需求工作台> --action push
+node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action code --non-ui true --reason "只改接口或非视觉逻辑"
+node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action commit
+node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action push
 ```
 
 Gate 1 后按执行档位生成可选模块：
 
 ```bash
-node <skill-dir>/scripts/scaffold-execution-mode.js <需求工作台>
+# 当前版本由主控按 Gate 1 选择手动生成必要目录；后续可接入 scaffold-execution-mode.js。
 ```
 
 Gate 2 前检查 review 可审查性：
 
 ```bash
-node <skill-dir>/scripts/check-reviewability.js <需求工作台> --strict true
+node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 ```
 
 Gate 2 前统一关门检查：
 
 ```bash
-node <skill-dir>/scripts/harness.js verify <需求工作台> --strict true
+node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 ```
 
-`verify --strict` 会组合检查工作台完整性、Gate 1 状态、review pack 粒度、`check-reviewability --strict true`、review agent fan-in 和 `reports/validation.md` 的验证证据；通过后才请求 Gate 2。`check-reviewability.js` 保留为底层 reviewability 专项检查。
+`verify --strict` 会组合检查工作台完整性、Gate 1 状态、review pack 和 `reports/validation.md` 的验证证据；通过后才请求 Gate 2。更细的 diff/patch/PR reviewability 检查后续作为 adapter 增强。
 
 普通非 UI 编码只需要 Gate 1 通过；如果存在 UI manifest，仍必须额外带 `--non-ui true --reason <原因>`。UI 编码必须额外带 `--ui true --boards --schemas --schema-extract`。
 
@@ -252,15 +257,15 @@ node <skill-dir>/scripts/harness.js verify <需求工作台> --strict true
 - 定位或创建 `documents/<需求同名目录>/`，并把原始 PRD、接口文档、UI 资料分别放在 `source/prd/`、`source/api/`、`source/ui/`；不要修改原始物料内容。
 - 定位或创建 `documents/<需求同名目录>/workbench/` 作为 `<需求工作台>`。
 - 扫描 PRD、接口文档、UI 资料、切图、截图和用户补充说明；读取原始物料时使用 `../source/...` 相对路径。
-- 在 `workbench/` 初始化 harness；初始化后必须生成或刷新 `harness.state.json` 和 `mission.state.json`。
-- 生成 `specs/material-index.md`：使用 `assets/material-index-template.md`，记录已发现物料、缺失物料、事实源和待确认项。
-- 如果存在接口文档、Swagger/OpenAPI、Postman、Mock 数据或后端依赖，生成或更新 `specs/api-spec.md`：使用 `assets/api-spec-template.md`，沉淀接口清单、入参、出参、数据模型、页面/任务映射、mock 场景、异常空态和待确认项。
+- 在 `workbench/` 初始化 SuperMaestro CLI；初始化后必须生成或刷新 `state.json`、`events.jsonl` 和 `mission.state.json`。
+- 生成 `specs/material-index.md`：参考 `templates/context-template.md` 的事实源结构，记录已发现物料、缺失物料、事实源和待确认项。
+- 如果存在接口文档、Swagger/OpenAPI、Postman、Mock 数据或后端依赖，生成或更新 `specs/api-spec.md`：沉淀接口清单、入参、出参、数据模型、页面/任务映射、mock 场景、异常空态和待确认项。
 - 如果存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json`，运行 `scripts/inspect-ui.js <需求工作台> --write-index true`。
 - 如果存在 `../source/ui/schemas/*.json`，必须创建或更新 `specs/ui-schema-extract.md`，并按画板写入节点级 Sketch Data 提取结果和 Schema 到实现映射表占位；图片缺失时记录 `schema-only`，不得把图片缺失记为可以跳过 UI 还原。
-- 生成或更新根目录 `context.md`：使用 `assets/context-template.md`，沉淀 PRD 摘要、业务规则、技术上下文、UI 契约、任务依赖、风险假设和验证计划。多 agent、worktree、长流程恢复前必须先读这份共享上下文。
-- 生成或更新 `plans/progress.md`：使用 `assets/progress-template.md`，先写当前阶段、任务状态表、进度日志、阻塞决策和验证进展；不要把动态任务状态只写在 `task-plan.md`。
-- 生成或更新 `reviews/review-packs.md`：使用 `assets/review-template.md`，先写每个 RP 的审查目标、预期 artifact、建议审查顺序和 pending 验证；不要复制长文件清单或重复 progress 状态。
-- 生成或更新 `reports/validation.md`：使用 `assets/report-template.md`，先记录已完成的规划/体检/API 检查、未执行检查和 pending 状态；不要等最终验证才创建文件。
+- 生成或更新根目录 `context.md`：使用 `templates/context-template.md`，沉淀 PRD 摘要、业务规则、技术上下文、UI 契约、任务依赖、风险假设和验证计划。多 agent、worktree、长流程恢复前必须先读这份共享上下文。
+- 生成或更新 `plans/progress.md`：使用 `templates/progress-template.md`，先写当前阶段、任务状态表、进度日志、阻塞决策和验证进展；不要把动态任务状态只写在 `task-plan.md`。
+- 生成或更新 `reviews/review-packs.md`：使用 `templates/review-packs-template.md`，先写每个 RP 的审查目标、预期 artifact、建议审查顺序和 pending 验证；不要复制长文件清单或重复 progress 状态。
+- 生成或更新 `reports/validation.md`：使用 `templates/validation-template.md`，先记录已完成的规划/体检/API 检查、未执行检查和 pending 状态；不要等最终验证才创建文件。
 
 ### 3. 生成计划
 
@@ -268,7 +273,7 @@ node <skill-dir>/scripts/harness.js verify <需求工作台> --strict true
 
 当需求包含多个页面、模块、公共组件、接口或不确定依赖时，读取 `references/split-strategy.md`。
 
-使用 `assets/plan-template.md` 写 `plans/task-plan.md`，至少包含：
+写 `plans/task-plan.md`，至少包含：
 
 - 共享上下文路径和关键结论。
 - 需求范围和非范围。
@@ -292,7 +297,7 @@ node <skill-dir>/scripts/harness.js verify <需求工作台> --strict true
 输出 Decision Brief 前，必须运行：
 
 ```bash
-node <skill-dir>/scripts/harness.js check-workbench <需求工作台>
+node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 ```
 
 如果检查失败，先补齐缺失文档再进入 Gate 1。`approve-gate1` 也会执行同样检查，缺少 `context.md`、`plans/progress.md`、`specs/api-spec.md`、`reviews/review-packs.md`、`reports/validation.md` 等必要文档时不得确认。
@@ -313,16 +318,16 @@ node <skill-dir>/scripts/harness.js check-workbench <需求工作台>
 - 将生成哪些可选工作台模块；未启用的 worktree/multi-agent 模块不得生成。
 - 推荐确认语必须匹配实际档位，例如：“按推荐继续，foundation 拆小先行，使用项目旁 worktree 隔离，foundation human-approved 后允许本地 checkpoint commit，下游基于 checkpoint commit 创建，每个 worker 完成后开只读 review agent，不自动提交 feature 改动，review 后再决定提交。”；如果不采用 checkpoint commit，必须明确替代的 patch/串行方案和 review 成本。
 
-用户确认后，运行 `approve-gate1` 写入状态；随后运行 `scripts/scaffold-execution-mode.js <需求工作台>`，只生成当前档位实际需要的可选模块。需要真实 agent、review agent、契约变更或独立集成计划时，用脚本参数显式开启对应目录。
+用户确认后，运行 `approve-gate1` 写入状态；随后只生成当前档位实际需要的可选模块。需要真实 agent、review agent、契约变更或独立集成计划时，必须在 `plans/progress.md` 和 `state.json` 中同步记录。
 
 ### 5. 执行任务
 
 - 编码型子 agent 默认使用独立 worktree 或独立分支；如果降级到主工作区串行，必须说明原因和 review pack 拆分方案。
 - 不开子 agent 不等于不能用 worktree；当用户选择 worktree=true、subagents=false 时，主控仍按任务使用隔离 worktree，但不生成 `agents/` handoff 文档。
 - 创建 worktree 时默认使用主仓库同级目录 `<repo>.worktrees/<task-id>`，例如主仓库为 `/path/project` 时使用 `/path/project.worktrees/<task-id>`；不得默认使用 `/tmp`、`/private/tmp` 或系统临时目录。
-- 启用 worktree 时，只需在 `plans/progress.md` 和可选的 `worktrees/plan.md` 记录 worktree/branch/review artifact。只有任务边界复杂、跨人交接或用户要求时，才使用 `assets/task-card-template.md` 生成 `workbench/tasks/TASK-*.md`。
+- 启用 worktree 时，只需在 `plans/progress.md` 和可选的 `worktrees/plan.md` 记录 worktree/branch/review artifact。只有任务边界复杂、跨人交接或用户要求时，才生成 `workbench/tasks/TASK-*.md`。
 - 启用 subagents 不等于生成 agent 文档；只有派发真实外部 agent/thread 时，才生成 `workbench/agents/<task-id>/brief.md` 和 handoff 路径。主控自己执行的任务不得伪造成 agent。
-- Feature 任务默认不能改公共契约；必须改时，使用 `assets/contract-change-template.md` 创建 CCR，并由主控决策。
+- Feature 任务默认不能改公共契约；必须改时，创建 `contract-changes/CCR-*.md`，并由主控决策。
 - 任务 DAG 中存在 Foundation Review Checkpoint 时，先完成拆小后的 foundation 任务，更新 `plans/progress.md`、`reviews/review-packs.md` 和 `reports/validation.md`，输出可审查 artifact，并停下请求用户 review；用户确认前，不启动依赖它的 feature agent/worktree，也不把下游任务标为 `running`。
 - Foundation human-approved 后，若下游 worktree 依赖该基线，先按用户确认创建本地 checkpoint commit，并从该 commit 创建或重建下游 worktree；`plans/progress.md`、`worktrees/plan.md` 和 review pack 必须记录 base commit。没有 checkpoint commit 时，不得把未提交 foundation 改动复制成多个 feature 的隐性基线，除非 Gate 1 已明确选择 patch/串行替代方案。
 - 如果某个 feature review 中发现必须修改公共组件、基础页面或公共契约，先暂停相关下游任务；由主控判断是 foundation bug、页面专属差异还是 contract change。属于公共依赖的问题必须回到 foundation 任务修正并重新 checkpoint review，确认后再同步给下游 worktree。
@@ -341,9 +346,7 @@ node <skill-dir>/scripts/harness.js check-workbench <需求工作台>
 
 完成任务前读取 `references/validation-checklist.md`。
 
-Gate 2 前运行 `scripts/harness.js verify <需求工作台> --strict true`。如果失败，先补齐工作台、per-RP branch、未提交 diff、patch、PR、review agent fan-in 或验证证据，再请求 Gate 2；不要为了通过 reviewability 检查自动 commit。
-`verify --strict` 内部会调用 `scripts/check-reviewability.js <需求工作台> --strict true`；如果只想定位 reviewability 专项问题，可以单独运行 `check-reviewability.js`。
-`check-reviewability --strict true` 也会检查主工作台 fan-in：Gate 2 已请求或进入 `gate-2-*` 阶段时，`plans/progress.md` 的 Review Agent 表、`agents/agent-index.md` 和 `worktrees/plan.md` 不能还停留在 `pending`、`running`、`assigned`、`ready-for-agent-review` 或 `changes-requested`。
+Gate 2 前运行 `scripts/supermaestro.js verify <需求工作台> --strict true`。如果失败，先补齐工作台、per-RP branch、未提交 diff、patch、PR、review agent fan-in 或验证证据，再请求 Gate 2；不要为了通过 reviewability 检查自动 commit。
 
 每个任务交接必须包含：
 
@@ -367,9 +370,9 @@ Review Agent Checkpoint 启用时：
 
 Foundation Review Checkpoint 的交接还必须包含：公共契约说明、下游任务清单、典型 mock/状态覆盖、API/组件 props 或页面入口契约、兼容性风险、回滚方式，以及用户确认结果。checkpoint 未确认或被打回时，不得把依赖它的下游 review pack 送入 Gate 2。
 
-使用 `assets/review-template.md` 写 `reviews/review-packs.md`。
+使用 `templates/review-packs-template.md` 写 `reviews/review-packs.md`。
 
-使用 `assets/report-template.md` 写 `reports/validation.md`，记录验证命令、未执行检查、API/Mock 结果、UI/视觉证据和最终交接状态。
+使用 `templates/validation-template.md` 写 `reports/validation.md`，记录验证命令、未执行检查、API/Mock 结果、UI/视觉证据和最终交接状态。
 
 ### 7. Human Gate 2 Review
 

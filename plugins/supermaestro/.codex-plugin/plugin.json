@@ -27,6 +27,7 @@
     ],
     "defaultPrompt": [
       "使用 $requirement-workbench 接收这个需求，生成 source 物料和 mission-control workbench，先停在 Gate 1。",
+      "使用 scripts/supermaestro.js 初始化和检查 workbench 的 state.json、events.jsonl、mission.state.json，再推进 Gate。",
       "使用 $mission-control 处理这个需求，先规划并生成 review pack。",
       "使用 $lanhu-export 从蓝湖链接导出 schema-only UI 物料。"
     ],
