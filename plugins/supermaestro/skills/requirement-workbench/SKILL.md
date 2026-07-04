@@ -40,7 +40,7 @@ documents/<需求同名目录>/
    - 蓝湖导出包、`manifest.json`、`schemas/*.json` 和可选图片基线放入 `source/ui/`。
 5. 如果 `source/api/` 中是接口文档地址或 Knife4j/Swagger/OpenAPI/Postman 入口，Gate 1 前必须先尝试解析真实接口清单：优先使用文档页面给出的 OpenAPI JSON；Knife4j 可尝试 `swagger-resources`、`/v3/api-docs`、`/v2/api-docs`；无法访问时在 `workbench/specs/api-spec.md` 标记 blocked/partial 和原因。不要把核心接口发现延后到 F1。
 6. 如果用户提供蓝湖 stage 链接或分组名，调用 `$lanhu-export`，默认以 schema-only 方式导出到 `source/ui/`；只有用户明确要求视觉基线时才导出图片。
-7. 如果存在 PRD 物料，调用 `$prd-structure`，默认把结构化结果放入 `workbench/specs/`，除非用户指定其他路径。
+7. 如果存在 PRD 物料，按需求复杂度调用 `$prd-structure`：轻量/中等 PRD 默认把关键事实并入 `workbench/context.md`，把待确认问题并入 `workbench/plans/progress.md`；只有长文档、截图/OCR 多、规则特别复杂或用户明确需要机器事实包时，才把结构化中间产物放入 `workbench/research/structured-prd/`。不要默认把 `structured-prd.json`、`structured-prd-review.md` 或 `open-questions.md` 放入 `workbench/specs/`。
 8. 运行 `node <skill-dir>/scripts/supermaestro.js init documents/<需求同名目录>/workbench --name "<需求名>"` 初始化机器状态。
 9. 调用 `$mission-control` 初始化或刷新工作台，完成 UI 体检、物料索引、共享上下文、任务计划、进度表、Review Pack 骨架和验证报告。
 10. 同时存在 API 物料和 UI 物料时，必须生成 `workbench/specs/page-contract-matrix.md`：把页面/模块、PRD source_ref、UI 画板/schema、接口/mock、公共契约和 RP 逐项绑定；多页面需求没有该矩阵不得进入 Gate 1。
@@ -49,7 +49,7 @@ documents/<需求同名目录>/
 ## 边界
 
 - 在获得对应的 `mission-control` Gate 确认前，不要开始编码、创建 worktree、派发子 agent、commit、merge、push 或清理 worktree。
-- 不要把 `structured-prd.json` 当成唯一事实源；必须保留 `source_ref`，并确保原始 PRD/API/UI 物料可回溯。
+- 不要把结构化 PRD 中间产物当成唯一事实源；必须保留 `source_ref`，并确保原始 PRD/API/UI 物料可回溯。轻量需求优先把可执行事实写入 `context.md`、`plans/task-plan.md` 和 `plans/progress.md`，避免在 `specs/` 堆放不会被编码直接引用的过程文件。
 - 不要自行发挥 UI 细节。只要存在 `source/ui/manifest.json` 和 `schemas/*.json`，就把 Sketch Data 作为 UI 主事实源，并遵守 `$mission-control` 的 UI 规则。
 - 不要把接口地址当成已确认接口契约；能解析时必须在 Gate 1 前解析并分类公共接口、页面接口和范围外接口，不能留给实现阶段临时发现。
 - 不要把蓝湖 Cookie、token、账号、私有链接等敏感信息写入 manifest、报告或最终回复。

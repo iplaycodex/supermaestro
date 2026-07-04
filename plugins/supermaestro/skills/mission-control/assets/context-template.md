@@ -24,6 +24,14 @@
 | 页面契约矩阵 | specs/page-contract-matrix.md | 页面、UI、API/mock、RP 绑定关系 |  |
 | 相关代码 |  | 现有实现约定 |  |
 
+## 物料健康与缺口
+
+- PRD：
+- API：
+- UI：
+- 资源：
+- 待确认：
+
 ## 范围
 
 需求范围：

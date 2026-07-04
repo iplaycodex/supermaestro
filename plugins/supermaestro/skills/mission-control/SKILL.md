@@ -108,7 +108,6 @@ documents/<需求同名目录>/
     │   ├── gate-2-decision.json
     │   └── gate-3-decision.json
     ├── specs/
-    │   ├── material-index.md
     │   ├── api-spec.md
     │   ├── ui-material-index.md
     │   ├── ui-schema-extract.md
@@ -259,7 +258,7 @@ node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 - 定位或创建 `documents/<需求同名目录>/workbench/` 作为 `<需求工作台>`。
 - 扫描 PRD、接口文档、UI 资料、切图、截图和用户补充说明；读取原始物料时使用 `../source/...` 相对路径。
 - 在 `workbench/` 初始化 SuperMaestro CLI；初始化后必须生成或刷新 `state.json`、`events.jsonl` 和 `mission.state.json`。
-- 生成 `specs/material-index.md`：参考 `templates/context-template.md` 的事实源结构，记录已发现物料、缺失物料、事实源和待确认项。
+- 在 `context.md` 中维护“物料与健康度/事实源”小节：记录已发现物料、缺失物料、事实源和关键待确认项。不要为轻量需求单独生成 `specs/material-index.md`；`specs/` 只放会直接约束实现或验收的规格。
 - 如果存在接口文档、Swagger/OpenAPI、Postman、Mock 数据或后端依赖，生成或更新 `specs/api-spec.md`：沉淀接口清单、入参、出参、数据模型、页面/任务映射、mock 场景、异常空态和待确认项。若原始物料是接口文档地址，Gate 1 前必须先尝试解析真实接口清单并记录 API Discovery：Knife4j/Swagger 优先读取 OpenAPI JSON，必要时尝试 `swagger-resources`、`/v3/api-docs`、`/v2/api-docs`；无法访问时明确 blocked/partial 和继续规划风险。
 - 如果存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json`，运行 `scripts/inspect-ui.js <需求工作台> --write-index true`。
 - 如果存在 `../source/ui/schemas/*.json`，必须创建或更新 `specs/ui-schema-extract.md`，并按画板写入节点级 Sketch Data 提取结果和 Schema 到实现映射表占位；图片缺失时记录 `schema-only`，不得把图片缺失记为可以跳过 UI 还原。

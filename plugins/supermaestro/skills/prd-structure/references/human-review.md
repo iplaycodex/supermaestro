@@ -24,19 +24,18 @@
 | `accepted` | 抽取正确 | 可进入计划和任务卡 |
 | `corrected` | 人工已修正 | 按修正后内容执行 |
 | `rejected` | 不属于需求或理解错误 | 不得进入实现 |
-| `unclear` | 需要产品/后端/设计确认 | 进入 open questions，阻塞相关任务 |
+| `unclear` | 需要产品/后端/设计确认 | 进入 `plans/progress.md` 的阻塞/待确认项，阻塞相关任务 |
 | `pending` | 尚未审查 | 不能作为编码唯一依据 |
 
 ## 偏差修正流程
 
 发现结构化 PRD 和原文或产品口径不一致时：
 
-1. 在 `structured-prd-review.md` 标记条目 ID、问题和正确口径。
-2. 修改 `structured-prd.json` 对应条目，保留原 `source_ref`。
-3. 在条目 `human_note` 写明修正原因。
-4. 同步更新 `open-questions.md`：已解决的问题移出阻塞，未解决的保持阻塞。
-5. 若已经生成 `$mission-control` 工作台，更新 `context.md`、`plans/task-plan.md`、`reviews/review-packs.md` 和 `reports/validation.md` 中受影响部分。
-6. 若已经编码，相关 review pack 标记 `changes-requested`，回到对应任务修复。
+1. 轻量/中等 PRD：直接更新 `context.md`、`plans/task-plan.md` 和 `plans/progress.md`，保留原文 `source_ref`。
+2. 复杂 PRD：可先在 `research/structured-prd/structured-prd-review.md` 标记条目 ID、问题和正确口径，再修改 `structured-prd.json`，保留原 `source_ref`，并在条目 `human_note` 写明修正原因。
+3. 同步待确认项：已解决的问题移出阻塞，未解决的保持在 `plans/progress.md` 和 Gate Brief 中；复杂 PRD 的 `open-questions.md` 仅作为临时来源。
+4. 若已经生成 `$mission-control` 工作台，更新 `context.md`、`plans/task-plan.md`、`reviews/review-packs.md` 和 `reports/validation.md` 中受影响部分。
+5. 若已经编码，相关 review pack 标记 `changes-requested`，回到对应任务修复。
 
 ## Gate 1 前最小审查清单
 

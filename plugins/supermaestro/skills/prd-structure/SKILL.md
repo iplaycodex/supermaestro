@@ -32,15 +32,18 @@ structured-prd/
 └── source-map.json            # 结构化条目到原文位置的映射
 ```
 
-在 `$mission-control` 工作台内使用时，推荐放在：
+在 `$mission-control` 工作台内使用时，默认不要把结构化中间产物放进 `workbench/specs/`。轻量/中等 PRD 应把可执行事实合并到 `context.md`、`plans/task-plan.md`，把阻塞/待确认问题合并到 `plans/progress.md` 或 Gate Brief。
+
+只有长文档、OCR/截图多、规则复杂到需要机器事实包，或用户明确要求保留结构化结果时，推荐放在：
 
 ```text
 documents/<需求名>/
 ├── source/prd/original.md
-└── workbench/specs/
+└── workbench/research/structured-prd/
     ├── structured-prd.json
     ├── structured-prd-review.md
-    └── open-questions.md
+    ├── open-questions.md
+    └── source-map.json
 ```
 
 若已有 `workbench/context.md`、`plans/task-plan.md`、`reviews/review-packs.md`，不要直接覆盖；先把结构化结果作为规格输入，待人工确认后再同步。
@@ -76,7 +79,7 @@ documents/<需求名>/
 
 5. 人工确认后再同步
    - `accepted` 和 `corrected` 可以进入 `context.md`、`task-plan.md`、任务卡和 review pack。
-   - `unclear` 保留在 `open-questions.md`，不得派发编码。
+   - `unclear` 必须进入 `plans/progress.md` 的阻塞/待确认项；如果当前是复杂 PRD 且已生成 `research/structured-prd/open-questions.md`，该文件只作为临时审查来源，不替代 progress 和 Gate Brief。
    - `rejected` 不得进入实现范围。
    - 如已经生成计划或代码，发现结构化偏差时必须回滚到规格层修正，再更新受影响任务。
 
@@ -96,9 +99,8 @@ documents/<需求名>/
 
 使用 `$mission-control` 时，结构化 PRD 的职责是提升 Gate 1 质量：
 
-- `structured-prd.json` 作为事实候选源。
-- `structured-prd-review.md` 作为 Gate 1 前人工审查清单。
-- `open-questions.md` 作为 Gate 1 Decision Brief 的阻塞/确认项来源。
+- 轻量/中等 PRD：不生成独立 `specs/structured-prd*` 文件；把事实摘要合并进 `context.md`，把阻塞/确认项合并进 `plans/progress.md` 和 Gate 1 Decision Brief。
+- 复杂 PRD：`research/structured-prd/structured-prd.json` 作为事实候选源，`structured-prd-review.md` 作为人工审查清单，`open-questions.md` 作为临时来源；确认后仍需 fan-in 回 `context.md`、`plans/task-plan.md` 和 `plans/progress.md`。
 - `source_ref` 帮助 review agent 和人工回到原文检查。
 
 不要让编码 worker 只读结构化 JSON。worker 至少还应读共享 `context.md`、相关 `specs/*`、任务卡和必要原文片段。

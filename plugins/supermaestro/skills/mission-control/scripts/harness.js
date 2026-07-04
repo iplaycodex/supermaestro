@@ -660,7 +660,6 @@ function requiredWorkbenchFiles(dir) {
     path.join('gates', 'gate-1-decision.json'),
     path.join('gates', 'gate-2-decision.json'),
     path.join('gates', 'gate-3-decision.json'),
-    path.join('specs', 'material-index.md'),
     path.join('plans', 'task-plan.md'),
     path.join('plans', 'progress.md'),
     path.join('reviews', 'review-packs.md'),
