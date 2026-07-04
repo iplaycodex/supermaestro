@@ -19,6 +19,9 @@
 - 自动提交 feature：no
 - Foundation human-approved 后 checkpoint commit 授权：
 - Worktree 可运行性：每个 worktree install / 完整项目拷贝 / 仅静态验证
+- 执行方式：SDD worker / 主控串行 / executing-plans fallback
+- TDD 适用性：required / not-applicable / deferred
+- TDD 证据写入：本任务 handoff + reports/validation.md
 
 ## 允许修改
 
@@ -47,6 +50,19 @@
 
 - Foundation 任务只实现本卡契约面；超过 5-8 个文件、3 个目录或 3 类契约面时，停止并要求主控拆分。
 - Feature 任务不得修改已批准 foundation 基线；review artifact 必须能显示 P-only diff。
+- `TDD 适用性: required` 时，必须先写失败测试并确认失败原因正确，再写最小实现让测试通过；不得先写生产代码再补测试。
+- `TDD 适用性: not-applicable` 时，必须说明本任务为何没有可测试行为代码。
+- `TDD 适用性: deferred` 时，必须说明阻塞原因、风险和后续补测动作。
+
+## TDD 计划
+
+| 行为/契约 | 测试文件 | RED 命令 | 预期失败原因 | GREEN 命令 | 证据状态 |
+| --- | --- | --- | --- | --- | --- |
+|  |  |  |  |  | pending |
+
+跳过或延后原因：
+
+-
 
 ## 验证命令
 

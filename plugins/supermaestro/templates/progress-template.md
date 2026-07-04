@@ -9,11 +9,16 @@
 
 ## Task Status
 
-| Task | Status | Owner | Review Artifact | Notes |
-| --- | --- | --- | --- | --- |
+| Task | Status | Owner | TDD | Review Artifact | Notes |
+| --- | --- | --- | --- | --- | --- |
 
 ## Log
 
 ## Blockers
 
 ## Validation Progress
+
+## TDD Progress
+
+| Task/RP | TDD Decision | RED Evidence | GREEN Evidence | Skip/Defer Reason |
+| --- | --- | --- | --- | --- |

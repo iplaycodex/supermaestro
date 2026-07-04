@@ -10,6 +10,15 @@
 - Review agent：只读审查某个 review pack 的 diff/patch、验证证据和风险，不修改源码，不提交。
 - Integration agent 或主控：合并各分支，处理冲突，跑总验证，更新 Gate 2 材料。
 
+## Superpowers 执行分层
+
+Mission Control 负责主控流程，Superpowers 负责 worker 执行纪律：
+
+- 计划阶段吸收 `superpowers:writing-plans` 的粒度：每个任务必须有明确文件、步骤、测试、命令和预期结果。
+- 真实多 agent 执行优先使用 `superpowers:subagent-driven-development`：主控给 worker 完整任务卡和最小必要上下文，worker 不继承主会话全部历史。
+- 编码 worker 必须按任务卡读取并遵守 `superpowers:test-driven-development`；只有任务卡标记 `TDD适用性: not-applicable` 或 `deferred` 时才可跳过，并且必须写明原因。
+- `superpowers:executing-plans` 只作为不开 subagent、跨会话或串行执行已有计划时的 fallback。
+
 ## Foundation-first
 
 多 agent 不得一开始同时修改公共文件。优先顺序：
@@ -51,10 +60,12 @@
 
 - 任务卡路径。
 - 必读上下文路径。
+- 需调用的执行技能：SDD 任务由主控使用 `superpowers:subagent-driven-development` 派发；编码 worker 根据任务卡使用 `superpowers:test-driven-development`。
 - 允许修改和禁止修改范围。
 - worktree/branch/base commit。
 - UI/API 事实源。
 - 验证命令。
+- TDD 决策和证据要求：RED 命令、预期失败原因、GREEN 命令、证据写入位置或跳过原因。
 - handoff 输出路径。
 
 ## Agent Handoff
@@ -66,6 +77,7 @@ Handoff 必须包含：
 - 完成内容。
 - 改动文件。
 - review artifact 引用：worktree diff、patch、PR，或用户明确授权后的 local commit。
+- TDD 证据：`required / not-applicable / deferred`、RED 命令与失败原因、GREEN 命令与通过结果、跳过或延后原因。
 - 验证命令和结果。
 - 未执行检查和原因。
 - 是否触碰公共契约。

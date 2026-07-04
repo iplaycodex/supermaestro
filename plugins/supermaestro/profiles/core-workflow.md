@@ -9,6 +9,7 @@ SuperMaestro core only owns workflow mechanics:
 - task DAG and review packs
 - handoff and validation artifacts
 - resume / next projection
+- execution discipline handoff to Superpowers skills
 
 Core must not contain project-specific UI, framework, or product rules. Put those rules in domain profiles.
 
@@ -46,3 +47,11 @@ workbench/reports/validation.md
 - Review artifacts must point to an actual diff, patch, branch, or PR.
 - Review agent output is evidence, not a correctness guarantee.
 - Human approval remains required for Gate 2 and Gate 3.
+
+## Superpowers Integration
+
+- Mission Control owns orchestration: workbench, gates, state, review packs, worktrees, fan-in, validation and final actions.
+- `superpowers:writing-plans` contributes task granularity: files, steps, tests, commands and expected results.
+- `superpowers:subagent-driven-development` is the preferred execution discipline when real independent worker agents are used.
+- `superpowers:executing-plans` is a fallback for serial or cross-session execution when subagents are not used.
+- `superpowers:test-driven-development` is the default discipline for worker tasks that touch behavior code. RED/GREEN evidence or an explicit skip/defer reason must appear in handoff and validation artifacts.

@@ -12,9 +12,10 @@
 4. 找出多个交付物共同依赖的基础能力。
 5. 找出可以在基础能力完成后并发推进的独立切片。
 6. 找出高风险的跨领域改动，保留给主控或专项 agent 处理。
-7. 给每个切片定义 review pack：文件范围、review artifact、预期 diff 命令、验证命令和排除项。
-8. 确定动态模块：串行只保留 Core；worktree 才生成 tasks/worktrees/integration；subagents 才生成 agents/handoff；checkpoint=false 且多个 RP 才生成 patches。
-9. 把结果整理成带前置依赖、review pack 和验证点的 DAG。
+7. 给每个切片标注 TDD 决策：`required / not-applicable / deferred`，并写明失败测试命令、预期失败原因、通过测试命令或跳过原因。
+8. 给每个切片定义 review pack：文件范围、review artifact、预期 diff 命令、验证命令和排除项。
+9. 确定动态模块：串行只保留 Core；worktree 才生成 tasks/worktrees/integration；subagents 才生成 agents/handoff；checkpoint=false 且多个 RP 才生成 patches。
+10. 把结果整理成带前置依赖、review pack、TDD 决策和验证点的 DAG。
 
 ## Foundation Review Checkpoint
 
@@ -40,6 +41,16 @@ Checkpoint 计划必须写清：
 - 一次最终集成。
 - 一个能让用户单独 review 的小 diff，通常不超过 5-8 个文件，且属于同一个功能面。
 
+## TDD 切分规则
+
+把 TDD 当成任务边界设计的一部分，不要等 worker 开始写代码后再临时决定。
+
+- `required`：接口封装、mock 数据契约、数据转换、hook、store、状态机、业务规则、权限/异常分支、路由参数、埋点参数、工具函数和可观察交互逻辑。
+- `not-applicable`：纯样式还原、切图/资源搬运、文案调整、配置登记、无行为分支的静态页面骨架、由工具生成且不应手改的代码。
+- `deferred`：当前环境缺少测试 harness、依赖无法安装、第三方运行时不可控或必须先完成 foundation 才能写有效测试。必须写清风险和后续补测点。
+
+UI 页面通常是混合任务：视觉还原走 Sketch Data/schema 验证；按钮禁用、投票状态、请求参数、分享计数、列表排序、异常空态等行为部分仍应标记为 `required` 并写 RED/GREEN 证据。
+
 ## 不好的任务形态
 
 - “把整个需求都实现了。”
@@ -56,14 +67,14 @@ Checkpoint 计划必须写清：
 
 ```text
 基础任务
-- F1: <名称> | 负责: <文件/模块> | review: <pack-name> | 解锁: P1,P2 | 验证: <命令>
+- F1: <名称> | 负责: <文件/模块> | review: <pack-name> | 解锁: P1,P2 | TDD: required/not-applicable/deferred | 验证: <命令>
 
 Foundation Checkpoint
 - C-F1: review F1 | 阻塞: P1,P2 | 放行条件: 用户确认 <公共契约/组件/基础页面> 可复用
 
 并发切片
-- P1: <名称> | 依赖: F1 | 负责: <文件/模块> | review: <pack-name> | 物料: <路径>
-- P2: <名称> | 依赖: F1 | 负责: <文件/模块> | review: <pack-name> | 物料: <路径>
+- P1: <名称> | 依赖: F1 | 负责: <文件/模块> | review: <pack-name> | TDD: required/not-applicable/deferred | 物料: <路径>
+- P2: <名称> | 依赖: F1 | 负责: <文件/模块> | review: <pack-name> | TDD: required/not-applicable/deferred | 物料: <路径>
 
 审查
 - R1: 审查 P1 | 依赖: P1

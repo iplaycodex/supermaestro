@@ -12,6 +12,8 @@
 - 自动提交 feature：no
 - Worktree 可运行性准备：
 - 如需 checkpoint commit 的用户授权：
+- 执行方式：SDD worker / 主控串行 / executing-plans fallback
+- TDD 适用性：required / not-applicable / deferred
 
 ## 完成内容
 
@@ -22,6 +24,18 @@
 - 
 
 ## 验证
+
+### TDD 证据
+
+| 行为/契约 | RED 命令 | RED 结果/失败原因 | GREEN 命令 | GREEN 结果 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+|  |  | pending |  | pending |  |
+
+跳过或延后原因：
+
+-
+
+### 验证命令
 
 | 命令 | 结果 | 备注 |
 | --- | --- | --- |

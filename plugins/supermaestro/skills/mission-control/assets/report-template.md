@@ -13,6 +13,16 @@
 | --- | --- | --- | --- |
 |  |  | pending |  |
 
+## TDD 证据汇总
+
+| RP/任务 | TDD 适用性 | RED 证据 | GREEN 证据 | 跳过/延后原因 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+|  | required / not-applicable / deferred |  |  |  | pending |
+
+TDD 风险：
+
+-
+
 ## 未执行检查
 
 | 检查 | 未执行原因 | 风险 | 后续动作 |

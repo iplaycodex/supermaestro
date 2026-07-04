@@ -10,6 +10,7 @@
 - 进度同步：`plans/progress.md`
 - Review artifact：worktree diff / patch / PR / explicit local commit
 - Foundation baseline：none / checkpoint commit after human approval
+- Superpowers 执行增强：writing-plans 粒度 / SDD / executing-plans fallback / TDD worker discipline
 
 ## 事实源
 
@@ -33,9 +34,18 @@
 
 ## 任务 DAG
 
-| 任务 | 类型 | 依赖/Base | 契约面/边界 | 允许修改 | 禁止修改 | Review Pack | 验证要求 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| F1a | foundation / feature / integration |  | API/mock / route/scheme / component / test |  |  | RP-F1a |  |
+| 任务 | 类型 | 依赖/Base | 契约面/边界 | 允许修改 | 禁止修改 | TDD 决策 | Review Pack | 验证要求 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| F1a | foundation / feature / integration |  | API/mock / route/scheme / component / test |  |  | required / not-applicable / deferred | RP-F1a |  |
+
+## 任务颗粒度要求
+
+每个编码任务必须按 `superpowers:writing-plans` 的粒度写清：
+
+- 修改文件和测试文件。
+- 关键实现步骤。
+- RED 命令、预期失败原因、GREEN 命令和预期通过结果。
+- 无法 TDD 时的跳过或延后原因、风险和后续补测动作。
 
 ## Foundation Review Checkpoint
 
@@ -51,6 +61,9 @@
 - Worktree：yes / no；root：
 - Subagents：yes / no；仅真实外部 agent/thread 才生成 `agents/`
 - Review agents：yes / no；仅只读审查真实 RP 时生成 `reviews/code-review/`
+- SDD：yes / no；真实多 agent 且任务独立时默认 yes
+- executing-plans fallback：yes / no；仅不开 subagent、跨会话或串行执行已有计划时使用
+- TDD worker discipline：required / partially-required / not-applicable；说明：
 - Contract changes：yes / no；仅真实契约变更才生成 `contract-changes/`
 - Integration：yes / no；仅独立集成分支/计划才生成 `integration/`
 - 不生成的模块和原因：
@@ -77,6 +90,7 @@
 - Review 成本：
 - Foundation Checkpoint：拆分、放行条件、checkpoint commit 和下游 base
 - Review Agent Checkpoint：每个 worker 完成后新开只读 review agent；如关闭，说明风险
+- Superpowers 执行增强：writing-plans 颗粒度、SDD 或 executing-plans fallback、TDD 覆盖范围和跳过条件
 - 启用模块：
 - 不生成模块：
 - 验证策略：

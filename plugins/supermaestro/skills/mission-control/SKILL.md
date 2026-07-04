@@ -37,6 +37,8 @@ description: Use when a medium or large software requirement needs staged planni
 - Worktree 和子 agent 是两个独立开关：可以只用 worktree 做代码隔离，不派发子 agent；也可以主控串行使用多个 worktree。
 - Worktree 只代表代码隔离，不代表必须生成 `tasks/`、`agents/`、`contract-changes/` 或 `integration/`。没有真实外部 agent、真实契约变更或真实集成分支时，不生成对应目录。
 - Review Agent Checkpoint 不新增正式 Gate，但在 `allowSubagents=true` 且派发真实编码 worker 时默认强制启用：每个 worker 完成 handoff 后，主控先做完成性检查，再新开只读 review agent 审查对应 RP；review agent 通过后才进入 `ready-for-human-review`。如用户明确关闭，Gate 1 Brief 必须写明缺少独立代码审查的 review 成本。
+- Superpowers 作为执行方法栈接入，但不替代 Mission Control 主控：本技能继续负责 workbench、Gate、状态、review pack、worktree 和集成；计划粒度优先吸收 `superpowers:writing-plans` 的“文件/步骤/测试/命令/预期结果”格式；真实多 agent 执行优先使用 `superpowers:subagent-driven-development`；不开 subagent 或跨会话串行执行时才使用 `superpowers:executing-plans`。
+- 编码 worker 默认必须评估 `superpowers:test-driven-development` 适用性。API/server/mock、hook、store、数据转换、状态机、跳转参数、权限/异常分支和业务计算等可测试行为必须先写失败测试并记录 RED/GREEN 证据；纯视觉还原、纯配置、资源搬运或生成代码可以跳过 TDD，但必须在任务卡、handoff 和 validation 中写明跳过原因。
 - 中大型需求必须把 reviewability 作为 Gate 1 硬约束；review pack 必须对应实际可审查产物（worktree 未提交 diff、patch、PR，或用户明确授权后的 local commit），不能只停留在 Markdown 文件列表。
 - 每个编码任务必须形成独立 review pack。预计超过 5-8 个文件或跨多个功能面时，继续拆分。
 - 默认禁止自动 commit：编码任务完成后保持 worktree 中的未提交改动供用户 review；只有用户在对应 review 后明确授权提交、commit 或 checkpoint commit，才允许执行本地 commit。
@@ -284,6 +286,7 @@ node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 - 页面契约矩阵路径和覆盖健康度；同时存在 API + UI 物料时，把页面/模块、PRD source_ref、UI 画板/schema、API/mock 和 RP 绑定关系放在 `specs/page-contract-matrix.md`，`task-plan.md` 只写摘要和关键风险。
 - UI 资源策略：列出用户提供的 OSS 前缀、本地切图目录、Sketch Data 图片节点和资源引用清单；强视觉区域计划用图片还是 CSS 必须在计划中写清。无法确认资源时，不得把该 UI 任务列为可直接编码。
 - 任务 DAG：基础任务、功能切片、审查任务、集成任务。
+- 任务颗粒度：参照 `superpowers:writing-plans`，每个可执行任务必须写清修改文件、测试文件、关键步骤、验证命令和预期结果；可测试行为必须包含 TDD 适用性、失败测试命令、预期失败原因、通过测试命令和证据记录位置。
 - 公共依赖和 Foundation Review Checkpoint：列明哪些 foundation 任务会解锁多个页面/功能切片、对应 review pack、验收标准、被阻塞的下游任务，以及用户确认前不得启动的范围。
 - 进度同步路径：`plans/progress.md`。
 - 执行档位推荐：主控串行、单 worktree 串行、多个 worktree/子 agent 并发。
@@ -319,6 +322,7 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 - 每个选择的 review 成本、单包文件数预估、回滚方式和是否能单独测试。
 - 如果存在公共依赖，列出 Foundation Review Checkpoint、被阻塞的下游任务、checkpoint 审查内容和放行条件。
 - 是否启用 Review Agent Checkpoint；真实编码 worker 默认必须启用。说明哪些 RP 需要 agent review、review agent 只读边界、发现问题后的修复归属和复查方式；若用户明确关闭，说明缺少独立 review agent 的风险。
+- 是否启用 Superpowers 执行增强：计划是否按 `writing-plans` 颗粒度生成，真实多 agent 是否使用 SDD，哪些任务必须 TDD，哪些任务允许跳过 TDD 以及原因。
 - 将生成哪些可选工作台模块；未启用的 worktree/multi-agent 模块不得生成。
 - 推荐确认语必须匹配实际档位，例如：“按推荐继续，foundation 拆小先行，使用项目旁 worktree 隔离，foundation human-approved 后允许本地 checkpoint commit，下游基于 checkpoint commit 创建，每个 worker 完成后开只读 review agent，不自动提交 feature 改动，review 后再决定提交。”；如果不采用 checkpoint commit，必须明确替代的 patch/串行方案和 review 成本。
 
@@ -327,6 +331,8 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 ### 5. 执行任务
 
 - 编码型子 agent 默认使用独立 worktree 或独立分支；如果降级到主工作区串行，必须说明原因和 review pack 拆分方案。
+- 启用真实子 agent 且任务相互独立时，主控优先按 `superpowers:subagent-driven-development` 执行：给每个 worker 提供完整任务卡和必要上下文，worker 完成后先做任务范围/规格符合性检查，再进入代码质量 review。不要让 worker 继承主会话的全部上下文或自行扩展任务范围。
+- 编码 worker 在动生产代码前必须读取并遵守 `superpowers:test-driven-development`，除非任务卡明确标记为 `TDD适用性: not-applicable` 或 `deferred` 且写明原因。适用 TDD 的任务必须先提交失败测试、确认失败原因正确，再实现最小代码并确认通过。
 - 不开子 agent 不等于不能用 worktree；当用户选择 worktree=true、subagents=false 时，主控仍按任务使用隔离 worktree，但不生成 `agents/` handoff 文档。
 - 创建 worktree 时默认使用主仓库同级目录 `<repo>.worktrees/<task-id>`，例如主仓库为 `/path/project` 时使用 `/path/project.worktrees/<task-id>`；不得默认使用 `/tmp`、`/private/tmp` 或系统临时目录。
 - 启用 worktree 时，只需在 `plans/progress.md` 和可选的 `worktrees/plan.md` 记录 worktree/branch/review artifact。只有任务边界复杂、跨人交接或用户要求时，才生成 `workbench/tasks/TASK-*.md`。
@@ -342,6 +348,7 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 - 派发子 agent 前读取 `references/agent-roles.md`。
 - Gate 1 `allowSubagents=true` 时读取 `references/multi-agent-protocol.md`，否则不要加载或生成多 agent 专用材料。
 - 每个任务必须在 `plans/progress.md` 或任务卡中有清晰边界：允许修改范围、禁止修改范围、输入物料、输出格式、验证命令、交接要求、预期 review artifact、base commit 和可运行性准备方式。
+- 每个编码任务必须在 `plans/progress.md` 或任务卡中记录 TDD 决策：`required / not-applicable / deferred`。`required` 必须记录 RED/GREEN 命令和证据；`not-applicable` 必须说明为何不是行为代码；`deferred` 必须说明阻塞、风险和后续补测动作。
 - UI 任务卡必须列出画板名、Sketch Data schema 路径、最终画板绑定证据、Sketch Data 提取结果、资源引用清单、Schema 到实现映射表、基线图（可选）、设计宽度/DPR、mock 数据和截图滚动位置；schema-only 时必须写明无图片基线也按 Sketch Data JSON 验收。
 - UI 编码过程中发现实现结构与 Sketch Data 明显不一致，或发现某个视觉节点需要图片资产但当前用 CSS 近似时，必须立刻暂停并更新 `plans/progress.md` 为 blocked/changes-needed；不能把问题留到 Gate 2 或交给用户肉眼兜底。
 - 任务状态更新直接写 `plans/progress.md`，不再通过 CLI 维护任务 CRUD；只有任务拆分、依赖或边界变化时才更新 `plans/task-plan.md`。
@@ -356,6 +363,7 @@ Gate 2 前运行 `scripts/supermaestro.js verify <需求工作台> --strict true
 
 - 行为总结。
 - 改动文件。
+- TDD 证据：适用性、RED 命令与失败原因、GREEN 命令与通过结果、跳过或延后原因。
 - 验证命令和结果。
 - 行为验证优先级：能跑聚焦测试就跑聚焦测试；能做页面/组件构建就跑构建；能做渲染/截图/路由/mock 链路检查就做对应检查。parser、formatter、`git diff --check` 只能作为最低静态检查，不能单独支撑“可工作”结论。
 - UI 任务的 Sketch Data 提取证据、expected、actual、diff 或无法截图原因。
@@ -389,6 +397,7 @@ Foundation Review Checkpoint 的交接还必须包含：公共契约说明、下
 - 每个 RP 的直接 diff 命令、worktree 路径、涉及文件和建议关注点。
 - 如果启用 review agent，列出每个 RP 的 agent review 结论、findings 摘要和 unresolved 数量；未通过 agent review 的 RP 不得请求 Gate 2。
 - 关键验证证据和未执行检查；明确区分静态检查、行为验证、构建验证和人工 UI 对比。
+- TDD 覆盖结论：哪些 RP 完成 RED/GREEN，哪些 RP 跳过或延后 TDD，跳过/延后原因是否已被用户或主控接受。
 - UI RP 必须单列视觉还原结论：最终画板是否匹配、资源映射是否完整、强视觉区域是否逐块核对、actual 截图或 schema-only 人工验收是否完成。若只完成静态检查，Gate 2 Decision Brief 必须明确写成未通过视觉验收，不能写 ready。
 - `reports/validation.md` 中的验证状态、剩余风险和跳过项。
 - `plans/progress.md` 中的完成状态、阻塞项和验证进展。

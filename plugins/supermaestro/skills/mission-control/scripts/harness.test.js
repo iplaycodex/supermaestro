@@ -42,7 +42,16 @@ write(path.join(wb, 'reports/validation.md'), [
   '',
 ].join('\n'))
 
-result = run(['approve-gate1', wb, '--mode', 'main-serial'], root)
+result = run([
+  'approve-gate1',
+  wb,
+  '--mode',
+  'main-serial',
+  '--confirmed-by',
+  'user',
+  '--confirmation',
+  '测试用户确认继续',
+], root)
 assert.strictEqual(result.status, 0, result.stdout + result.stderr)
 
 result = run(['verify', wb, '--strict', 'true'], root)
