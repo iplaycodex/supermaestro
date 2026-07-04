@@ -6,6 +6,18 @@ const path = require('path');
 const WORKFLOW_VERSION = 1;
 const GENERATED_WORKBENCH_DIRS = new Set(['gates', 'plans', 'reports', 'reviews', 'specs', 'ui', 'workbench']);
 const API_MATERIAL_NAME_RE = /(api|swagger|openapi|postman|mock|interface|interfaces|接口|后端|联调|knife4j)/i;
+const SUPERPOWER_EVIDENCE_RE = /(已读取|已调用|已使用|已吸收|已执行|已完成|used|loaded|applied|executed|completed)/i;
+const SUPERPOWER_SKILLS = {
+  writingPlans: 'superpowers:writing-plans',
+  subagentDrivenDevelopment: 'superpowers:subagent-driven-development',
+  executingPlans: 'superpowers:executing-plans',
+  testDrivenDevelopment: 'superpowers:test-driven-development',
+  systematicDebugging: 'superpowers:systematic-debugging',
+  requestingCodeReview: 'superpowers:requesting-code-review',
+  receivingCodeReview: 'superpowers:receiving-code-review',
+  verificationBeforeCompletion: 'superpowers:verification-before-completion',
+  finishingDevelopmentBranch: 'superpowers:finishing-a-development-branch'
+};
 const DEFAULT_STATE = {
   phase: 'initialized',
   gates: {
@@ -147,6 +159,7 @@ function checkWorkbench(workbench) {
     throw new Error(`Workbench check failed. Missing or empty: ${allMissing.join(', ')}`);
   }
 
+  validateSuperpowerEvidence(workbench, [SUPERPOWER_SKILLS.writingPlans], 'check-workbench');
   console.log('Workbench check passed.');
 }
 
@@ -209,12 +222,27 @@ function checkAction(workbench, options) {
     if (options.ui === 'true') {
       validateUiSchemaExtract(workbench, options.schemaExtract);
     }
+    validateSuperpowerEvidence(
+      workbench,
+      [
+        SUPERPOWER_SKILLS.testDrivenDevelopment,
+        state.execution?.subagents === true
+          ? SUPERPOWER_SKILLS.subagentDrivenDevelopment
+          : SUPERPOWER_SKILLS.executingPlans
+      ],
+      'code'
+    );
     console.log('ALLOW code');
     return;
   }
 
   if (['commit', 'merge', 'push', 'cleanup'].includes(action)) {
     requireGate(state, 'gate3');
+    validateSuperpowerEvidence(
+      workbench,
+      [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
+      action
+    );
     console.log(`ALLOW ${action}`);
     return;
   }
@@ -229,20 +257,40 @@ function verify(workbench, options) {
   const reviewPack = options.reviewPack || 'reviews/review-packs.md';
   const validation = options.validation || 'reports/validation.md';
   const missing = [reviewPack, validation].filter(file => !hasNonEmptyFile(path.join(workbench, file)));
+  const requiredSuperpowers = [
+    SUPERPOWER_SKILLS.testDrivenDevelopment,
+    SUPERPOWER_SKILLS.verificationBeforeCompletion,
+    state.execution?.subagents === true
+      ? SUPERPOWER_SKILLS.subagentDrivenDevelopment
+      : SUPERPOWER_SKILLS.executingPlans
+  ];
+  if (hasFailureOrReviewFinding(workbench)) requiredSuperpowers.push(SUPERPOWER_SKILLS.systematicDebugging);
+  if (state.execution?.subagents === true || hasReviewAgentWork(workbench)) {
+    requiredSuperpowers.push(SUPERPOWER_SKILLS.requestingCodeReview);
+  }
+  if (/changes-requested|changes requested/i.test(superpowerEvidenceText(workbench))) {
+    requiredSuperpowers.push(SUPERPOWER_SKILLS.receivingCodeReview);
+  }
+  const missingSuperpowers = missingSuperpowerEvidence(workbench, Array.from(new Set(requiredSuperpowers)));
 
   state.checks.reviewability = missing.length ? 'failed' : 'passed';
-  state.checks.validation = missing.length ? 'failed' : 'passed';
+  state.checks.validation = missing.length || missingSuperpowers.length ? 'failed' : 'passed';
   state.checks.verifyMissing = missing;
 
-  if (missing.length) {
+  if (missing.length || missingSuperpowers.length) {
     state.updatedAt = now();
     saveState(workbench, state);
     appendEvent(workbench, 'verify', {
       strict: readBoolean(options.strict, false),
       result: 'failed',
-      missing
+      missing,
+      missingSuperpowers
     });
-    throw new Error(`Verify failed. Missing or empty: ${missing.join(', ')}`);
+    const fileText = missing.length ? `Missing or empty: ${missing.join(', ')}` : '';
+    const superpowerText = missingSuperpowers.length
+      ? `Missing Superpowers evidence: ${missingSuperpowers.join(', ')}`
+      : '';
+    throw new Error(`Verify failed. ${[fileText, superpowerText].filter(Boolean).join('; ')}`);
   }
 
   validateVisualEvidence(workbench, validation);
@@ -271,6 +319,56 @@ function requestGate2(workbench, options) {
   writeProjection(workbench, nextState);
   appendEvent(workbench, 'request-gate2', {});
   console.log('Gate 2 requested.');
+}
+
+function superpowerEvidenceText(workbench) {
+  return [
+    path.join(workbench, 'reports', 'validation.md'),
+    path.join(workbench, 'plans', 'task-plan.md'),
+    path.join(workbench, 'plans', 'progress.md'),
+    path.join(workbench, 'reviews', 'review-packs.md')
+  ]
+    .filter(file => fs.existsSync(file))
+    .map(file => fs.readFileSync(file, 'utf8'))
+    .join('\n\n');
+}
+
+function hasSuperpowerEvidence(content, skill) {
+  const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sameLineEvidence = content.split(/\r?\n/).some(line => {
+    return line.includes(skill) && !/pending\s*\//i.test(line) && SUPERPOWER_EVIDENCE_RE.test(line);
+  });
+  if (sameLineEvidence) return true;
+
+  const skillEvidence = new RegExp(`${escaped}[\\s\\S]{0,240}${SUPERPOWER_EVIDENCE_RE.source}`, 'i');
+  const evidenceSkill = new RegExp(`${SUPERPOWER_EVIDENCE_RE.source}[\\s\\S]{0,240}${escaped}`, 'i');
+  const match = content.match(skillEvidence) || content.match(evidenceSkill);
+  return Boolean(match && !/pending\s*\//i.test(match[0]));
+}
+
+function missingSuperpowerEvidence(workbench, skills) {
+  const content = superpowerEvidenceText(workbench);
+  return skills.filter(skill => !hasSuperpowerEvidence(content, skill));
+}
+
+function validateSuperpowerEvidence(workbench, skills, action) {
+  const missing = missingSuperpowerEvidence(workbench, skills);
+  if (!missing.length) return;
+  throw new Error(
+    `DENY ${action}: 缺少 Superpowers 调用证据：${missing.join(', ')}。请先实际读取/调用对应 skill，并在 reports/validation.md 的“Superpowers 调用证据”中记录已读取、已调用或已吸收的证据。`
+  );
+}
+
+function hasFailureOrReviewFinding(workbench) {
+  return /(bug|测试失败|构建失败|联调异常|review finding|changes-requested|changes requested|根因|失败)/i.test(
+    superpowerEvidenceText(workbench)
+  );
+}
+
+function hasReviewAgentWork(workbench) {
+  return /(reviews\/code-review|agent-approved|changes-requested|findings)/i.test(
+    superpowerEvidenceText(workbench)
+  );
 }
 
 function recommendNext(state) {

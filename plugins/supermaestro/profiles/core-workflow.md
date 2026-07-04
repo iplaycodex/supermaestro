@@ -40,6 +40,7 @@ workbench/reports/validation.md
 - Gate 2 must pass before requesting final actions.
 - Gate 3 must pass before commit, merge, push, cleanup, or rollback.
 - CLI checks are stronger than prompt instructions. If a script rejects an action, stop and report the reason.
+- Superpowers integration is enforced by CLI evidence gates. When a phase requires a `superpowers:*` skill, the agent must actually read/use that skill and record evidence in `reports/validation.md`; mentioning future intent in the plan is not enough.
 
 ## Review Rules
 
@@ -60,3 +61,11 @@ workbench/reports/validation.md
 - `superpowers:receiving-code-review` shapes changes-requested handling: verify feedback against codebase reality before fixing, and push back with technical evidence when needed.
 - `superpowers:verification-before-completion` is required before Gate 2, Gate 3, completion claims, commits, merges, pushes, or PR creation.
 - `superpowers:finishing-a-development-branch` shapes Gate 3 final action menus and cleanup safety, while Human Gate 3 and CLI checks remain authoritative.
+
+Hard gate mapping:
+
+- Gate 1 workbench checks require `superpowers:writing-plans` evidence.
+- Code action checks require `superpowers:test-driven-development` plus either `superpowers:subagent-driven-development` or `superpowers:executing-plans` evidence, depending on execution mode.
+- Subagent dispatch checks require `superpowers:subagent-driven-development` evidence.
+- Gate 2 verification requires `superpowers:verification-before-completion` evidence and conditionally requires debugging/review evidence when failures or review findings exist.
+- Gate 3/final action checks require `superpowers:verification-before-completion` and `superpowers:finishing-a-development-branch` evidence.

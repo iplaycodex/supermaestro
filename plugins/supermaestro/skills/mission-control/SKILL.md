@@ -43,6 +43,12 @@ description: Use when a medium or large software requirement needs staged planni
 - Review Agent Checkpoint 必须吸收 `superpowers:requesting-code-review`：review agent 输入必须包含任务说明、需求/计划、base/head 或 diff 命令、验证证据和明确审查目标；review 输出必须 findings 优先。处理 review findings 时必须吸收 `superpowers:receiving-code-review`：主控/worker 先核实建议是否符合当前代码和需求，再逐项修复、复查或技术性驳回。
 - Gate 2/Gate 3 前必须吸收 `superpowers:verification-before-completion`：没有本轮新鲜验证命令、输出和结论，不得声称完成、通过或 ready；验证失败时如实停在 blocked/changes-needed。
 - Gate 3 收尾必须吸收 `superpowers:finishing-a-development-branch`：先验证，再判断 normal repo/worktree/detached 状态，再给出 merge/PR/keep/discard/cleanup 等动作影响；执行危险动作前仍以 Human Gate 3 和 CLI `check` 为准。
+- Superpowers 不是可选文案。凡本技能声明“必须/优先/默认吸收”的场景，必须先实际读取或调用对应 `superpowers:*` skill，并在 `reports/validation.md` 的“Superpowers 调用证据”表记录 `已读取/已调用/已吸收/已执行` 等证据；只在 `task-plan.md` 写“计划使用”不算通过。脚本硬闸门会在以下动作拒绝缺证据流程：
+  - `check-workbench` / `approve-gate1`：必须有 `superpowers:writing-plans` 证据。
+  - `check --action code`：必须有 `superpowers:test-driven-development` 证据；按 Gate 1 执行模式还必须有 `superpowers:subagent-driven-development` 或 `superpowers:executing-plans` 证据。
+  - `check --action dispatch-subagent`：必须有 `superpowers:subagent-driven-development` 证据。
+  - `verify --strict` / `request-gate2`：必须有 `superpowers:verification-before-completion` 证据，并按实际触发补齐 TDD、SDD/serial、debugging、requesting/receiving review 证据。
+  - `request-gate3` / `approve-gate3` / final action `check`：必须有 `superpowers:verification-before-completion` 和 `superpowers:finishing-a-development-branch` 证据。
 - 中大型需求必须把 reviewability 作为 Gate 1 硬约束；review pack 必须对应实际可审查产物（worktree 未提交 diff、patch、PR，或用户明确授权后的 local commit），不能只停留在 Markdown 文件列表。
 - 每个编码任务必须形成独立 review pack。预计超过 5-8 个文件或跨多个功能面时，继续拆分。
 - 默认禁止自动 commit：编码任务完成后保持 worktree 中的未提交改动供用户 review；只有用户在对应 review 后明确授权提交、commit 或 checkpoint commit，才允许执行本地 commit。
@@ -309,7 +315,7 @@ node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 ```
 
-如果检查失败，先补齐缺失文档再进入 Gate 1。`approve-gate1` 也会执行同样检查，缺少 `context.md`、`plans/progress.md`、`specs/api-spec.md`、`reviews/review-packs.md`、`reports/validation.md` 等必要文档时不得确认。
+如果检查失败，先补齐缺失文档再进入 Gate 1。`approve-gate1` 也会执行同样检查，缺少 `context.md`、`plans/progress.md`、`specs/api-spec.md`、`reviews/review-packs.md`、`reports/validation.md` 等必要文档，或缺少 `superpowers:writing-plans` 调用证据时不得确认。
 
 给用户一份简短 Decision Brief：
 

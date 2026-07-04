@@ -21,6 +21,18 @@ const KNOWN_ACTIONS = new Set([...BASE_ACTIONS, ...GATE1_ACTIONS, ...GATE3_ACTIO
 const WORKTREE_ACTIONS = new Set(['create-worktree', 'create-branch', 'sync-materials'])
 const GENERATED_WORKBENCH_DIRS = new Set(['gates', 'plans', 'reports', 'reviews', 'specs', 'ui', 'workbench'])
 const API_MATERIAL_NAME_RE = /(api|swagger|openapi|postman|mock|interface|interfaces|接口|后端|联调|knife4j)/i
+const SUPERPOWER_EVIDENCE_RE = /(已读取|已调用|已使用|已吸收|已执行|已完成|used|loaded|applied|executed|completed)/i
+const SUPERPOWER_SKILLS = {
+  writingPlans: 'superpowers:writing-plans',
+  subagentDrivenDevelopment: 'superpowers:subagent-driven-development',
+  executingPlans: 'superpowers:executing-plans',
+  testDrivenDevelopment: 'superpowers:test-driven-development',
+  systematicDebugging: 'superpowers:systematic-debugging',
+  requestingCodeReview: 'superpowers:requesting-code-review',
+  receivingCodeReview: 'superpowers:receiving-code-review',
+  verificationBeforeCompletion: 'superpowers:verification-before-completion',
+  finishingDevelopmentBranch: 'superpowers:finishing-a-development-branch'
+}
 
 function now() {
   return new Date().toISOString()
@@ -376,6 +388,56 @@ function validationEvidence(dir) {
   return { ok: problems.length === 0, problems, warnings }
 }
 
+function superpowerEvidenceText(dir) {
+  return [
+    path.join(dir, 'reports', 'validation.md'),
+    path.join(dir, 'plans', 'task-plan.md'),
+    path.join(dir, 'plans', 'progress.md'),
+    path.join(dir, 'reviews', 'review-packs.md')
+  ]
+    .map(readMissionText)
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+function hasSuperpowerEvidence(content, skill) {
+  const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const sameLineEvidence = content.split(/\r?\n/).some(line => {
+    return line.includes(skill) && !/pending\s*\//i.test(line) && SUPERPOWER_EVIDENCE_RE.test(line)
+  })
+  if (sameLineEvidence) return true
+
+  const skillEvidence = new RegExp(`${escaped}[\\s\\S]{0,240}${SUPERPOWER_EVIDENCE_RE.source}`, 'i')
+  const evidenceSkill = new RegExp(`${SUPERPOWER_EVIDENCE_RE.source}[\\s\\S]{0,240}${escaped}`, 'i')
+  const match = content.match(skillEvidence) || content.match(evidenceSkill)
+  return Boolean(match && !/pending\s*\//i.test(match[0]))
+}
+
+function missingSuperpowers(content, skills) {
+  return skills.filter(skill => !hasSuperpowerEvidence(content, skill))
+}
+
+function validateSuperpowerEvidence(dir, skills, action) {
+  const content = superpowerEvidenceText(dir)
+  const missing = missingSuperpowers(content, skills)
+  if (!missing.length) return
+
+  deny(
+    action,
+    `缺少 Superpowers 调用证据：${missing.join(', ')}。请先实际读取/调用对应 skill，并在 reports/validation.md 的“Superpowers 调用证据”中记录已读取、已调用或已吸收的证据。`
+  )
+}
+
+function hasFailureOrReviewFinding(dir) {
+  const content = superpowerEvidenceText(dir)
+  return /(bug|测试失败|构建失败|联调异常|review finding|changes-requested|changes requested|根因|失败)/i.test(content)
+}
+
+function hasReviewAgentWork(dir) {
+  const content = superpowerEvidenceText(dir)
+  return /(reviews\/code-review|agent-approved|changes-requested|findings)/i.test(content)
+}
+
 function runReviewability(dir, strict) {
   const script = path.join(__dirname, 'check-reviewability.js')
   if (!fs.existsSync(script)) {
@@ -412,6 +474,28 @@ function verifySummary(dir, flags = {}) {
 
   if (!reviewPackCount(dir)) {
     problems.push('reviews/review-packs.md 未发现 RP 标题。')
+  }
+
+  const superpowerContent = superpowerEvidenceText(dir)
+  const requiredSuperpowers = [
+    SUPERPOWER_SKILLS.testDrivenDevelopment,
+    SUPERPOWER_SKILLS.verificationBeforeCompletion
+  ]
+  requiredSuperpowers.push(
+    gate1.allowSubagents === true
+      ? SUPERPOWER_SKILLS.subagentDrivenDevelopment
+      : SUPERPOWER_SKILLS.executingPlans
+  )
+  if (hasFailureOrReviewFinding(dir)) requiredSuperpowers.push(SUPERPOWER_SKILLS.systematicDebugging)
+  if (gate1.allowSubagents === true || hasReviewAgentWork(dir)) {
+    requiredSuperpowers.push(SUPERPOWER_SKILLS.requestingCodeReview)
+  }
+  if (/changes-requested|changes requested/i.test(superpowerContent)) {
+    requiredSuperpowers.push(SUPERPOWER_SKILLS.receivingCodeReview)
+  }
+  const missingSuperpowerEvidence = missingSuperpowers(superpowerContent, Array.from(new Set(requiredSuperpowers)))
+  if (missingSuperpowerEvidence.length) {
+    problems.push(`缺少 Superpowers 调用证据：${missingSuperpowerEvidence.join(', ')}。`)
   }
 
   const reviewability = runReviewability(dir, strict)
@@ -1042,6 +1126,7 @@ function resume(dir, flags) {
 function checkWorkbench(dir) {
   requireState(dir)
   validateWorkbench(dir)
+  validateSuperpowerEvidence(dir, [SUPERPOWER_SKILLS.writingPlans], 'check-workbench')
   console.log('ALLOW check-workbench')
 }
 
@@ -1066,6 +1151,7 @@ function approveGate1(dir, flags) {
   const allowCheckpointCommit = parseBoolean(flags.checkpoint, false)
   const { p, state, gate1 } = requireState(dir)
   validateWorkbench(dir)
+  validateSuperpowerEvidence(dir, [SUPERPOWER_SKILLS.writingPlans], 'approve-gate1')
   const approvedAt = now()
 
   writeJson(p.gate1, {
@@ -1164,6 +1250,11 @@ function requestGate3(dir, flags) {
   if (gate2.status !== 'approved') {
     throw new Error('Cannot request Gate 3 before Gate 2 review is approved.')
   }
+  validateSuperpowerEvidence(
+    dir,
+    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
+    'request-gate3'
+  )
   if (gate3.status === 'approved' && !force) {
     throw new Error('Gate 3 is already approved. Use --force true only when intentionally re-requesting it.')
   }
@@ -1185,6 +1276,11 @@ function approveGate3(dir, flags) {
   if (gate3.status !== 'pending') {
     throw new Error('Gate 3 is not pending. Run request-gate3 first.')
   }
+  validateSuperpowerEvidence(
+    dir,
+    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
+    'approve-gate3'
+  )
 
   const nextGate3 = {
     ...gate3,
@@ -1215,6 +1311,32 @@ function check(dir, flags) {
   validateGate3(action, gate3)
 
   const warnings = action === 'code' ? validateCodeMode(dir, flags) : []
+  if (action === 'code') {
+    validateSuperpowerEvidence(
+      dir,
+      [
+        SUPERPOWER_SKILLS.testDrivenDevelopment,
+        gate1.allowSubagents === true
+          ? SUPERPOWER_SKILLS.subagentDrivenDevelopment
+          : SUPERPOWER_SKILLS.executingPlans
+      ],
+      'code'
+    )
+  }
+  if (action === 'dispatch-subagent') {
+    validateSuperpowerEvidence(
+      dir,
+      [SUPERPOWER_SKILLS.subagentDrivenDevelopment],
+      'dispatch-subagent'
+    )
+  }
+  if (GATE3_ACTIONS.has(action)) {
+    validateSuperpowerEvidence(
+      dir,
+      [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
+      action
+    )
+  }
 
   console.log(`ALLOW ${action}`)
   for (const warning of warnings) console.log(`WARN ${warning}`)

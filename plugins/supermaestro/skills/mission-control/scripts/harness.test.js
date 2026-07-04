@@ -42,6 +42,39 @@ write(path.join(wb, 'reports/validation.md'), [
   '',
 ].join('\n'))
 
+result = run(['check-workbench', wb], root)
+assert.notStrictEqual(result.status, 0, 'Gate 1 workbench should require writing-plans evidence')
+assert.match(result.stderr, /superpowers:writing-plans/)
+
+write(path.join(wb, 'reports/validation.md'), [
+  '# 验证报告',
+  '',
+  '## Superpowers 调用证据',
+  '',
+  '| Skill | 场景 | 结果 | 证据 |',
+  '| --- | --- | --- | --- |',
+  '| superpowers:writing-plans | Gate 1 任务计划 | pending / 已读取并吸收 |  |',
+  '',
+].join('\n'))
+result = run(['check-workbench', wb], root)
+assert.notStrictEqual(result.status, 0, 'placeholder Superpowers evidence should not pass')
+assert.match(result.stderr, /superpowers:writing-plans/)
+
+write(path.join(wb, 'reports/validation.md'), [
+  '# 验证报告',
+  '',
+  '## Superpowers 调用证据',
+  '',
+  '| Skill | 场景 | 结果 | 证据 |',
+  '| --- | --- | --- | --- |',
+  '| superpowers:writing-plans | Gate 1 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
+  '',
+  '| 验证项 | 类型 | 状态 | 证据/备注 |',
+  '| --- | --- | --- | --- |',
+  '| 静态检查 | static | passed | PASS 示例检查通过 |',
+  '',
+].join('\n'))
+
 result = run([
   'approve-gate1',
   wb,
@@ -53,6 +86,24 @@ result = run([
   '测试用户确认继续',
 ], root)
 assert.strictEqual(result.status, 0, result.stdout + result.stderr)
+
+write(path.join(wb, 'reports/validation.md'), [
+  '# 验证报告',
+  '',
+  '## Superpowers 调用证据',
+  '',
+  '| Skill | 场景 | 结果 | 证据 |',
+  '| --- | --- | --- | --- |',
+  '| superpowers:writing-plans | Gate 1 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
+  '| superpowers:test-driven-development | 编码任务纪律 | 已读取并吸收 | F1a 标记 required，记录 RED/GREEN 位置 |',
+  '| superpowers:executing-plans | 主控串行执行 | 已读取并吸收 | Gate 1 未启用 subagents，使用串行执行计划 |',
+  '| superpowers:verification-before-completion | Gate 2 前验证 | 已读取并执行 | 本轮验证命令和 exit code 已记录 |',
+  '',
+  '| 验证项 | 类型 | 状态 | 证据/备注 |',
+  '| --- | --- | --- | --- |',
+  '| 静态检查 | static | passed | PASS 示例检查通过 |',
+  '',
+].join('\n'))
 
 result = run(['verify', wb, '--strict', 'true'], root)
 assert.strictEqual(result.status, 0, result.stdout + result.stderr)
@@ -85,6 +136,12 @@ write(path.join(matrixWb, 'plans', 'progress.md'), '# 进度同步\n\n')
 write(path.join(matrixWb, 'reviews', 'review-packs.md'), '# 审查包\n\n### RP-P1-demo\n')
 write(path.join(matrixWb, 'reports', 'validation.md'), [
   '# 验证报告',
+  '',
+  '## Superpowers 调用证据',
+  '',
+  '| Skill | 场景 | 结果 | 证据 |',
+  '| --- | --- | --- | --- |',
+  '| superpowers:writing-plans | Gate 1 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
   '',
   '| 验证项 | 类型 | 状态 | 证据/备注 |',
   '| --- | --- | --- | --- |',
