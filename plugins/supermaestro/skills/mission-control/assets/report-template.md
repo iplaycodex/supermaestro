@@ -13,6 +13,12 @@
 | --- | --- | --- | --- |
 |  |  | pending |  |
 
+## 完成前验证
+
+| 声明/动作 | 证明命令 | 执行时间 | Exit code | 输出摘要 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| Gate 2 ready / Gate 3 ready / merge / commit / push / cleanup |  |  |  |  | pending |
+
 ## TDD 证据汇总
 
 | RP/任务 | TDD 适用性 | RED 证据 | GREEN 证据 | 跳过/延后原因 | 结论 |
@@ -22,6 +28,12 @@
 TDD 风险：
 
 -
+
+## 调试证据汇总
+
+| RP/任务 | 触发原因 | 根因 | 修复 | 复验证据 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+|  | bug / test failure / build failure / review finding |  |  |  | pending |
 
 ## 未执行检查
 
@@ -56,6 +68,8 @@ schema-only 验证：
 - Review Pack：
 - Gate 2 Review：
 - Gate 3 最终动作：
+- Gate 3 环境：normal repo / linked worktree / detached HEAD
+- Gate 3 选择：merge local / push PR / keep / discard / cleanup
 - 进度同步：
 - 已提交/未提交状态：
 - 是否已 merge：

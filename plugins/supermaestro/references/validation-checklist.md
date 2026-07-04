@@ -7,6 +7,9 @@ Minimum:
 - Workbench completeness check.
 - Review pack references actual artifacts.
 - Validation report lists executed and skipped checks.
+- Fresh verification evidence before any completion, Gate 2, Gate 3, commit, merge, push, or PR claim.
+- Root-cause evidence for any bug, test failure, build failure, integration failure, or behavior review finding.
+- Review feedback is verified against codebase reality before implementation.
 
 For frontend / Taro:
 

@@ -16,8 +16,10 @@
 - 相关 happy path、失败态、空态、loading、边界状态已处理。
 - 接口或 mock 契约被正确遵守。
 - 修改公共逻辑、共享工具、请求代码或复杂 UI 行为时，已补充或更新测试。
+- 如果任务经历 bug、测试失败、构建失败或行为 review finding，已按 systematic debugging 记录复现、错误信息、最近改动检查、根因假设、最小修复和复验结果。
 - 已记录验证命令和结果，并标明验证类型：static、behavior、build、ui-review。
 - Parser、formatter、`git diff --check` 只算 static 检查；除非任务只改文档或纯格式，否则不能单独作为完成依据。
+- 任何完成声明、ready 状态或 Gate 请求都有本轮新鲜验证证据；没有重新运行验证命令时，只能标记为 partial/blocked/pending。
 
 ## UI/视觉验收
 
@@ -46,6 +48,8 @@
 - review 输出应按 review pack 组织，避免让用户在一个大 diff 中自行拆边界。
 - 启用 review agent 时，review agent 必须只读；不得修改源码、暂存、commit、merge、push 或清理 worktree。
 - 启用 review agent 且存在阻塞 findings 时，不能进入 human review 或 Gate 2；必须回到实现 worktree 修复并复查。
+- review agent 输入必须包含变更描述、需求/任务卡、base/head 或 diff 命令、验证证据和审查范围，不能只给聊天摘要。
+- 处理 review feedback 前必须先核实建议是否符合当前代码、需求边界和既有用户决策；正确的逐项修复，错误或超范围的写明技术理由并交给主控/用户决策。
 
 ## 最终集成验收
 
@@ -56,3 +60,5 @@
 - 对页面/路由/组件切片，优先跑聚焦测试、页面构建、路由可达性、mock 数据链路或截图检查中的至少一项；确实不可行时写清阻塞点。
 - 跳过的检查说明原因；如果命令没有进入代码检查或编译阶段，要明确写出阻塞点。
 - 最终答复包含改动范围、验证证据、未解决风险和建议下一步。
+- Gate 3 前已判断当前环境是 normal repo、linked worktree 还是 detached HEAD，并记录 worktree 是否由本流程创建。
+- merge/commit/push/cleanup 前已执行对应 CLI check 和最新验证；merge 成功后才允许清理 worktree；PR/keep 选择不清理 worktree；discard 需要额外明确确认。

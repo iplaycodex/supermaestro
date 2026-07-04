@@ -22,6 +22,9 @@
 - 执行方式：SDD worker / 主控串行 / executing-plans fallback
 - TDD 适用性：required / not-applicable / deferred
 - TDD 证据写入：本任务 handoff + reports/validation.md
+- Debug 触发：bug / test failure / build failure / integration failure / review finding 时 required
+- Review Agent：not-needed / required
+- 完成前验证：required
 
 ## 允许修改
 
@@ -53,6 +56,8 @@
 - `TDD 适用性: required` 时，必须先写失败测试并确认失败原因正确，再写最小实现让测试通过；不得先写生产代码再补测试。
 - `TDD 适用性: not-applicable` 时，必须说明本任务为何没有可测试行为代码。
 - `TDD 适用性: deferred` 时，必须说明阻塞原因、风险和后续补测动作。
+- 出现失败或 review finding 时，必须先完成根因调查再修复；handoff 必须记录复现、根因、证据、最小修复和复验结果。
+- 声称任务完成前，必须重新运行本卡验证命令并记录输出；不能引用过期结果。
 
 ## TDD 计划
 
@@ -69,6 +74,11 @@
 ```bash
 
 ```
+
+## Review 要求
+
+- Review agent 输入：变更说明、任务卡、base/head 或 diff 命令、验证证据、TDD/调试证据。
+- changes-requested 处理：先核实 finding 是否成立，再修复/驳回/请求主控决策。
 
 ## 完成标准
 

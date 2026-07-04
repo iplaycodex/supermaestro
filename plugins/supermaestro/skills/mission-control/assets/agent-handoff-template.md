@@ -14,6 +14,7 @@
 - 如需 checkpoint commit 的用户授权：
 - 执行方式：SDD worker / 主控串行 / executing-plans fallback
 - TDD 适用性：required / not-applicable / deferred
+- 调试状态：not-needed / investigated / blocked
 
 ## 完成内容
 
@@ -34,6 +35,20 @@
 跳过或延后原因：
 
 -
+
+### 调试证据
+
+适用于 bug、测试失败、构建失败、联调异常或 review finding 修复；无则写 `不适用`。
+
+| 项 | 内容 |
+| --- | --- |
+| 复现方式/失败命令 |  |
+| 错误信息/症状 |  |
+| 最近改动检查 |  |
+| 根因假设 |  |
+| 证据 |  |
+| 最小修复 |  |
+| 复验命令与结果 |  |
 
 ### 验证命令
 

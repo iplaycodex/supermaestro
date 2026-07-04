@@ -55,3 +55,8 @@ workbench/reports/validation.md
 - `superpowers:subagent-driven-development` is the preferred execution discipline when real independent worker agents are used.
 - `superpowers:executing-plans` is a fallback for serial or cross-session execution when subagents are not used.
 - `superpowers:test-driven-development` is the default discipline for worker tasks that touch behavior code. RED/GREEN evidence or an explicit skip/defer reason must appear in handoff and validation artifacts.
+- `superpowers:systematic-debugging` is required when a worker hits bugs, test failures, build failures, integration failures, or behavior review findings.
+- `superpowers:requesting-code-review` shapes Review Agent Checkpoints: focused scope, requirements, base/head or diff, verification evidence, and findings-first output.
+- `superpowers:receiving-code-review` shapes changes-requested handling: verify feedback against codebase reality before fixing, and push back with technical evidence when needed.
+- `superpowers:verification-before-completion` is required before Gate 2, Gate 3, completion claims, commits, merges, pushes, or PR creation.
+- `superpowers:finishing-a-development-branch` shapes Gate 3 final action menus and cleanup safety, while Human Gate 3 and CLI checks remain authoritative.

@@ -26,10 +26,13 @@
 - Base / 对比基线：
 - Diff 命令：
 - 验证证据：
+- TDD 证据：
+- 调试证据：
 - 未验证风险：
 - UI 证据：
 - Review Agent：not-needed / pending / changes-requested / agent-approved
 - Review Agent findings：
+- Review feedback 处理：not-needed / pending / verified / pushed-back / fixed
 - Foundation Checkpoint：yes / no
 - 用户结论：pending / approved / changes-requested
 
@@ -38,6 +41,8 @@
 - Review Pack 是否完整：
 - Artifact 是否覆盖每个 RP 和 untracked 新文件：
 - Review Agent 是否已通过或明确不需要：
+- Review findings 是否已按 receiving-code-review 核实并处理：
 - 验证记录是否可接受：
+- 是否有本轮新鲜验证证据：
 - 未执行检查是否已说明风险：
 - 是否允许进入 Gate 3：

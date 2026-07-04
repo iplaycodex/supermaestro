@@ -9,8 +9,8 @@
 
 ## Task Status
 
-| Task | Status | Owner | TDD | Review Artifact | Notes |
-| --- | --- | --- | --- | --- | --- |
+| Task | Status | Owner | TDD | Debug | Review Artifact | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
 
 ## Log
 
@@ -22,3 +22,16 @@
 
 | Task/RP | TDD Decision | RED Evidence | GREEN Evidence | Skip/Defer Reason |
 | --- | --- | --- | --- | --- |
+
+## Debugging Progress
+
+| Task/RP | Trigger | Root Cause | Fix | Recheck Evidence |
+| --- | --- | --- | --- | --- |
+
+## Gate 3 Finish
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| Fresh verification | pending |  |
+| Environment | normal repo / linked worktree / detached HEAD |  |
+| Final action | merge / PR / keep / discard / cleanup |  |

@@ -6,7 +6,7 @@
 - 共享上下文：workbench/context.md
 - 主控进度：workbench/plans/progress.md（只读；不得修改）
 - 规格：
-- 执行技能：编码任务按任务卡使用 `superpowers:test-driven-development`；本 agent 只处理任务卡边界内工作。
+- 执行技能：编码任务按任务卡使用 `superpowers:test-driven-development`；遇到失败使用 `superpowers:systematic-debugging`；本 agent 只处理任务卡边界内工作。
 
 ## 执行环境
 
@@ -19,6 +19,7 @@
 - Worktree 可运行性准备：每个 worktree install / 完整项目拷贝 / 仅静态验证
 - 执行方式：SDD worker / 主控串行 / executing-plans fallback
 - TDD 适用性：required / not-applicable / deferred
+- 调试纪律：bug / test failure / build failure / integration failure / review finding 时必须先根因调查
 
 ## 边界
 
@@ -36,6 +37,7 @@
 - Review artifact：
 - 验证证据：
 - TDD 证据：RED 命令与失败原因、GREEN 命令与通过结果；如跳过或延后，写明原因、风险和补测动作。
+- 调试证据：复现步骤、错误信息、最近改动检查、根因假设、验证证据、最小修复和复验结果。
 - 不要修改主控工作台的 `plans/progress.md`、`agents/agent-index.md`、`worktrees/plan.md`、`reviews/review-packs.md` 或 `reports/validation.md`；这些由主控根据 handoff fan-in。
 
 ## TDD 纪律
@@ -46,4 +48,4 @@
 
 ## 阻塞处理
 
-遇到公共契约变化、权限问题、物料缺失或跨任务冲突时，停止扩大改动，写 handoff 并通知主控。
+遇到公共契约变化、权限问题、物料缺失、跨任务冲突，或连续多次修复失败时，停止扩大改动，写 handoff 并通知主控。不得在未确认根因时继续叠加猜测性修改。

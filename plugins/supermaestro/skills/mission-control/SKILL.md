@@ -39,6 +39,10 @@ description: Use when a medium or large software requirement needs staged planni
 - Review Agent Checkpoint 不新增正式 Gate，但在 `allowSubagents=true` 且派发真实编码 worker 时默认强制启用：每个 worker 完成 handoff 后，主控先做完成性检查，再新开只读 review agent 审查对应 RP；review agent 通过后才进入 `ready-for-human-review`。如用户明确关闭，Gate 1 Brief 必须写明缺少独立代码审查的 review 成本。
 - Superpowers 作为执行方法栈接入，但不替代 Mission Control 主控：本技能继续负责 workbench、Gate、状态、review pack、worktree 和集成；计划粒度优先吸收 `superpowers:writing-plans` 的“文件/步骤/测试/命令/预期结果”格式；真实多 agent 执行优先使用 `superpowers:subagent-driven-development`；不开 subagent 或跨会话串行执行时才使用 `superpowers:executing-plans`。
 - 编码 worker 默认必须评估 `superpowers:test-driven-development` 适用性。API/server/mock、hook、store、数据转换、状态机、跳转参数、权限/异常分支和业务计算等可测试行为必须先写失败测试并记录 RED/GREEN 证据；纯视觉还原、纯配置、资源搬运或生成代码可以跳过 TDD，但必须在任务卡、handoff 和 validation 中写明跳过原因。
+- 遇到 bug、测试失败、构建失败、联调异常或 reviewer 反馈中的行为问题时，必须按 `superpowers:systematic-debugging` 先做根因调查，再提出或实施修复。handoff/review pack 必须记录复现、根因假设、证据、最小修复和验证结果；不得把“猜测性修改”包装成修复。
+- Review Agent Checkpoint 必须吸收 `superpowers:requesting-code-review`：review agent 输入必须包含任务说明、需求/计划、base/head 或 diff 命令、验证证据和明确审查目标；review 输出必须 findings 优先。处理 review findings 时必须吸收 `superpowers:receiving-code-review`：主控/worker 先核实建议是否符合当前代码和需求，再逐项修复、复查或技术性驳回。
+- Gate 2/Gate 3 前必须吸收 `superpowers:verification-before-completion`：没有本轮新鲜验证命令、输出和结论，不得声称完成、通过或 ready；验证失败时如实停在 blocked/changes-needed。
+- Gate 3 收尾必须吸收 `superpowers:finishing-a-development-branch`：先验证，再判断 normal repo/worktree/detached 状态，再给出 merge/PR/keep/discard/cleanup 等动作影响；执行危险动作前仍以 Human Gate 3 和 CLI `check` 为准。
 - 中大型需求必须把 reviewability 作为 Gate 1 硬约束；review pack 必须对应实际可审查产物（worktree 未提交 diff、patch、PR，或用户明确授权后的 local commit），不能只停留在 Markdown 文件列表。
 - 每个编码任务必须形成独立 review pack。预计超过 5-8 个文件或跨多个功能面时，继续拆分。
 - 默认禁止自动 commit：编码任务完成后保持 worktree 中的未提交改动供用户 review；只有用户在对应 review 后明确授权提交、commit 或 checkpoint commit，才允许执行本地 commit。
@@ -333,6 +337,7 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 - 编码型子 agent 默认使用独立 worktree 或独立分支；如果降级到主工作区串行，必须说明原因和 review pack 拆分方案。
 - 启用真实子 agent 且任务相互独立时，主控优先按 `superpowers:subagent-driven-development` 执行：给每个 worker 提供完整任务卡和必要上下文，worker 完成后先做任务范围/规格符合性检查，再进入代码质量 review。不要让 worker 继承主会话的全部上下文或自行扩展任务范围。
 - 编码 worker 在动生产代码前必须读取并遵守 `superpowers:test-driven-development`，除非任务卡明确标记为 `TDD适用性: not-applicable` 或 `deferred` 且写明原因。适用 TDD 的任务必须先提交失败测试、确认失败原因正确，再实现最小代码并确认通过。
+- Worker 遇到失败时必须先使用 `superpowers:systematic-debugging`：完整读取错误、稳定复现、检查最近改动、对照工作示例、形成单一根因假设，再做最小修复。连续多次修复失败时，停止扩大改动并把根因调查和阻塞项交给主控。
 - 不开子 agent 不等于不能用 worktree；当用户选择 worktree=true、subagents=false 时，主控仍按任务使用隔离 worktree，但不生成 `agents/` handoff 文档。
 - 创建 worktree 时默认使用主仓库同级目录 `<repo>.worktrees/<task-id>`，例如主仓库为 `/path/project` 时使用 `/path/project.worktrees/<task-id>`；不得默认使用 `/tmp`、`/private/tmp` 或系统临时目录。
 - 启用 worktree 时，只需在 `plans/progress.md` 和可选的 `worktrees/plan.md` 记录 worktree/branch/review artifact。只有任务边界复杂、跨人交接或用户要求时，才生成 `workbench/tasks/TASK-*.md`。
@@ -342,6 +347,7 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 - Foundation human-approved 后，若下游 worktree 依赖该基线，先按用户确认创建本地 checkpoint commit，并从该 commit 创建或重建下游 worktree；`plans/progress.md`、`worktrees/plan.md` 和 review pack 必须记录 base commit。没有 checkpoint commit 时，不得把未提交 foundation 改动复制成多个 feature 的隐性基线，除非 Gate 1 已明确选择 patch/串行替代方案。
 - 如果某个 feature review 中发现必须修改公共组件、基础页面或公共契约，先暂停相关下游任务；由主控判断是 foundation bug、页面专属差异还是 contract change。属于公共依赖的问题必须回到 foundation 任务修正并重新 checkpoint review，确认后再同步给下游 worktree。
 - 启用 Review Agent Checkpoint 时，编码任务完成后不要直接标记 `ready-for-human-review`；主控先根据 handoff、diff、验证记录判断 worker 是否完成任务边界，再标记 `ready-for-agent-review` 并派发新的只读 review agent 审查该 RP。发现问题则标记 `changes-requested` 并回到原实现 worktree 修复；无阻塞问题才标记 `agent-approved` / `ready-for-human-review`。
+- Review findings 进入 `changes-requested` 后，主控和 worker 必须按 `superpowers:receiving-code-review` 处理：先读完整反馈并复述技术要求，再核对代码事实和需求边界；确认正确的问题逐项修复并验证，不正确或超范围的问题记录技术理由并交给用户或主控决策。
 - 每次 worker handoff、review agent 输出、foundation checkpoint 或下游 worktree 创建后，必须由主控把结果 fan-in 回主工作台：同步 `plans/progress.md`、`agents/agent-index.md`、`worktrees/plan.md`、`reviews/review-packs.md`、`reports/validation.md`。不得把某个 worktree 内的工作台文件当成全局状态已经更新。
 - Review agent 的输入必须限制在该 RP：共享上下文、任务计划/进度、相关 API/UI 规格、review pack、diff 命令或 patch、验证记录。不得让 review agent 自行扩大需求范围或重写实现。
 - 创建 worktree 前读取 `references/worktree-strategy.md`。
@@ -359,11 +365,14 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 
 Gate 2 前运行 `scripts/supermaestro.js verify <需求工作台> --strict true`。如果失败，先补齐工作台、per-RP branch、未提交 diff、patch、PR、review agent fan-in 或验证证据，再请求 Gate 2；不要为了通过 reviewability 检查自动 commit。
 
+Gate 2/Gate 3 或任何完成声明前，必须执行 `superpowers:verification-before-completion` 的证据优先规则：识别能证明结论的命令，运行完整命令，读取输出和 exit code，并把证据写入 `reports/validation.md`。没有新鲜证据时只能报告“未验证/部分验证”，不能说完成或通过。
+
 每个任务交接必须包含：
 
 - 行为总结。
 - 改动文件。
 - TDD 证据：适用性、RED 命令与失败原因、GREEN 命令与通过结果、跳过或延后原因。
+- 调试证据：如本任务经历 bug/test/build 失败，记录复现方式、根因、假设验证、修复点和复验结果。
 - 验证命令和结果。
 - 行为验证优先级：能跑聚焦测试就跑聚焦测试；能做页面/组件构建就跑构建；能做渲染/截图/路由/mock 链路检查就做对应检查。parser、formatter、`git diff --check` 只能作为最低静态检查，不能单独支撑“可工作”结论。
 - UI 任务的 Sketch Data 提取证据、expected、actual、diff 或无法截图原因。
@@ -375,6 +384,7 @@ Gate 2 前运行 `scripts/supermaestro.js verify <需求工作台> --strict true
 Review Agent Checkpoint 启用时：
 
 - review agent 输出写入 `reviews/code-review/<RP>.md`，或汇总进 `reviews/code-review/index.md` 和 `reviews/review-packs.md`。
+- review agent 输入必须包含 `requesting-code-review` 风格上下文：变更描述、需求/任务计划、base/head 或 diff 命令、验证证据、禁止扩大范围和期望输出。
 - review agent 只写自己的 review 输出；`reviews/review-packs.md`、`plans/progress.md` 和其他主工作台索引由主控 fan-in 更新。
 - 输出必须采用 code-review 姿态：findings 优先，按严重级别排序，包含文件/行号或紧密位置、行为风险、测试缺口和建议修复方向。
 - review agent 只能读代码和写 review 记录；不得修改源码、暂存、commit、merge、push 或清理 worktree。
@@ -393,6 +403,7 @@ Foundation Review Checkpoint 的交接还必须包含：公共契约说明、下
 请求 Gate 2 前输出 Decision Brief：
 
 - `verify --strict` 是否通过；如果失败，不得请求 Gate 2。
+- 新鲜验证证据：本轮实际运行了哪些命令、exit code、失败数或通过数；不得引用过期结果来证明当前状态。
 - 已完成的 review pack，按建议 review 顺序列出；feature RP 必须能用 P-only diff 查看，不混入已 human-approved 的 foundation 基线。
 - 每个 RP 的直接 diff 命令、worktree 路径、涉及文件和建议关注点。
 - 如果启用 review agent，列出每个 RP 的 agent review 结论、findings 摘要和 unresolved 数量；未通过 agent review 的 RP 不得请求 Gate 2。
@@ -416,10 +427,12 @@ merge、commit、push 或清理 worktree 前，必须进入 Gate 3。
 - 当前推荐动作组合。
 - 每个动作的影响。
 - Gate 2 Review 是否已确认。
+- 收尾环境判断：normal repo / linked worktree / detached HEAD；worktree 是否由本流程创建；可安全清理范围。
+- 最终动作前验证证据：merge/commit/push/cleanup 前最近一次测试、构建、diff 或 reviewability 检查结果。
 - 是否已完成最终状态同步和验证记录。
 - 当前是否还有未提交、未跟踪或只存在于 worktree 的文件。
 
-用户确认后运行 `request-gate3` 和 `approve-gate3`。执行具体动作前再运行对应 `check`。
+用户确认后运行 `request-gate3` 和 `approve-gate3`。执行具体动作前再运行对应 `check`。merge/PR/keep/discard/cleanup 选择必须遵循 `finishing-a-development-branch` 的安全顺序：验证先于动作，merge 成功后再清理，discard 必须额外确认，PR/keep 不清理 worktree。
 
 最终答复必须说明：
 
