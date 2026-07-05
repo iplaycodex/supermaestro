@@ -156,6 +156,8 @@ function resume(workbench) {
 
 function checkWorkbench(workbench) {
   const state = requireState(workbench);
+  state.checks = { ...(state.checks || {}) };
+
   const required = requiredWorkbenchFiles(workbench);
   const missing = required.filter(file => !hasNonEmptyFile(resolveWorkbenchRef(workbench, file)));
   const missingAlternatives = requiredWorkbenchAlternatives(workbench)
@@ -163,19 +165,36 @@ function checkWorkbench(workbench) {
     .map(entry => entry.label);
   const allMissing = missing.concat(missingAlternatives);
 
-  state.checks.workbench = allMissing.length ? 'failed' : 'passed';
-  state.checks.workbenchMissing = allMissing;
-  state.updatedAt = now();
-  saveState(workbench, state);
-  appendEvent(workbench, 'check-workbench', { result: state.checks.workbench, missing: allMissing });
-
   if (allMissing.length) {
-    throw new Error(`Workbench check failed. Missing or empty: ${allMissing.join(', ')}`);
+    recordWorkbenchCheck(workbench, state, 'failed', allMissing, `Workbench check failed. Missing or empty: ${allMissing.join(', ')}`);
   }
 
-  validateRequirementAlignment(workbench);
-  validateGate1BrainstormingFanIn(workbench);
+  try {
+    validateRequirementAlignment(workbench);
+    validateGate1BrainstormingFanIn(workbench);
+  } catch (error) {
+    recordWorkbenchCheck(workbench, state, 'failed', allMissing, error.message);
+  }
+
+  recordWorkbenchCheck(workbench, state, 'passed', [], null);
   console.log('Workbench check passed.');
+}
+
+function recordWorkbenchCheck(workbench, state, result, missing, errorMessage) {
+  state.checks.workbench = result;
+  state.checks.workbenchMissing = missing;
+  if (errorMessage) {
+    state.checks.workbenchError = errorMessage;
+  } else {
+    delete state.checks.workbenchError;
+  }
+  state.updatedAt = now();
+  saveState(workbench, state);
+  appendEvent(workbench, 'check-workbench', { result, missing, error: errorMessage || undefined });
+
+  if (errorMessage) {
+    throw new Error(errorMessage);
+  }
 }
 
 function approveGate1(workbench, options) {
@@ -273,12 +292,7 @@ function checkAction(workbench, options) {
 
   if (action === 'code') {
     requireGate(state, 'gate2');
-    if (options.ui === 'true' && !options.schemaExtract) {
-      throw new Error('UI coding requires --schema-extract.');
-    }
-    if (options.ui === 'true') {
-      validateUiSchemaExtract(workbench, options.schemaExtract);
-    }
+    validateCodeMode(workbench, options);
     validateSuperpowerEvidence(
       workbench,
       [
@@ -290,6 +304,20 @@ function checkAction(workbench, options) {
       'code'
     );
     console.log('ALLOW code');
+    return;
+  }
+
+  if (action === 'dispatch-subagent') {
+    requireGate(state, 'gate2');
+    if (state.execution?.subagents !== true) {
+      throw new Error('Gate 2 execution mode did not enable subagents. Re-run approve-gate2 with --subagents true after user confirmation.');
+    }
+    validateSuperpowerEvidence(
+      workbench,
+      [SUPERPOWER_SKILLS.subagentDrivenDevelopment],
+      'dispatch-subagent'
+    );
+    console.log('ALLOW dispatch-subagent');
     return;
   }
 
@@ -548,6 +576,70 @@ function validateUiSchemaExtract(workbench, schemaExtract) {
   }
 }
 
+function validateCodeMode(workbench, options) {
+  const uiRequested = Boolean(
+    readBoolean(options.ui, false) ||
+      options.boards ||
+      options.schemas ||
+      options.schemaExtract ||
+      options.baselines
+  );
+  const nonUiRequested = readBoolean(options.nonUi, false);
+
+  if (uiRequested && nonUiRequested) {
+    throw new Error('UI code checks and non-UI code checks cannot be used together.');
+  }
+
+  if (hasUiManifest(workbench) && !uiRequested && !nonUiRequested) {
+    throw new Error('UI materials detected. Non-UI code checks require --non-ui true --reason "<原因>"; UI code checks require --ui true --boards --schemas --schema-extract.');
+  }
+
+  if (nonUiRequested) {
+    const reason = String(options.reason || '').trim();
+    if (reason.length < 6) {
+      throw new Error('Non-UI code checks require --non-ui true --reason "<原因>" with a specific reason.');
+    }
+    return;
+  }
+
+  if (uiRequested) {
+    validateUiCodeMode(workbench, options);
+  }
+}
+
+function validateUiCodeMode(workbench, options) {
+  const boards = csv(options.boards);
+  const schemas = csv(options.schemas);
+  const baselines = csv(options.baselines);
+  const schemaOnly = readBoolean(options.schemaOnly, false);
+  const problems = [];
+
+  if (!boards.length) problems.push('missing --boards');
+  if (!schemas.length) problems.push('missing --schemas');
+
+  const missingSchemas = schemas.filter(ref => !hasNonEmptyFile(resolveWorkbenchRef(workbench, ref)));
+  if (missingSchemas.length) {
+    problems.push(`missing or empty schema files: ${missingSchemas.join(', ')}`);
+  }
+
+  if (!options.schemaExtract) {
+    problems.push('missing --schema-extract');
+  }
+
+  const missingBaselines = baselines.filter(ref => !hasNonEmptyFile(resolveWorkbenchRef(workbench, ref)));
+  if (!baselines.length && !schemaOnly) {
+    problems.push('missing --baselines or --schema-only true');
+  } else if (missingBaselines.length && !schemaOnly) {
+    problems.push(`missing or empty baselines: ${missingBaselines.join(', ')}`);
+  }
+
+  if (problems.length) {
+    throw new Error(`UI schema-first check failed: ${problems.join('; ')}`);
+  }
+
+  validateUiSchemaExtract(workbench, options.schemaExtract);
+}
+
 function validateVisualEvidence(workbench, validationRef) {
   if (!hasUiManifest(workbench)) return;
   const file = resolveWorkbenchRef(workbench, validationRef);
@@ -640,6 +732,14 @@ function readBoolean(value, fallback) {
   if (value === true || value === 'true') return true;
   if (value === false || value === 'false') return false;
   return fallback;
+}
+
+function csv(value) {
+  if (value === undefined || value === null || value === true) return [];
+  return String(value)
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
 }
 
 function hasNonEmptyFile(file) {
@@ -816,9 +916,13 @@ function printHelp() {
   node scripts/supermaestro.js check-workbench <workbench>
   node scripts/supermaestro.js approve-gate1 <workbench> --confirmed-by user --confirmation <text>
   node scripts/supermaestro.js approve-gate2 <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
-  node scripts/supermaestro.js check <workbench> --action code
+  node scripts/supermaestro.js check <workbench> --action code --non-ui true --reason <reason>
+  node scripts/supermaestro.js check <workbench> --action code --ui true --boards <names> --schemas <paths> --schema-extract <path> --schema-only true
+  node scripts/supermaestro.js check <workbench> --action dispatch-subagent
   node scripts/supermaestro.js verify <workbench> --strict true
   node scripts/supermaestro.js request-gate3 <workbench>
+  node scripts/supermaestro.js approve-gate3 <workbench> --review true --validation true
   node scripts/supermaestro.js request-gate4 <workbench>
+  node scripts/supermaestro.js approve-gate4 <workbench> --merge false --commit false --push false --cleanup false
 `);
 }

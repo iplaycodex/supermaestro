@@ -237,6 +237,7 @@ node <plugin-root>/scripts/supermaestro.js approve-gate4 <需求工作台> --mer
 
 ```bash
 node <plugin-root>/scripts/supermaestro.js check <需求工作台> --action code --non-ui true --reason "只改接口或非视觉逻辑"
+node <plugin-root>/scripts/supermaestro.js check <需求工作台> --action dispatch-subagent
 node <plugin-root>/scripts/supermaestro.js check <需求工作台> --action commit
 node <plugin-root>/scripts/supermaestro.js check <需求工作台> --action push
 ```

@@ -1,0 +1,18 @@
+{
+  "name": "supermaestro",
+  "version": "1.0.6",
+  "private": true,
+  "description": "Requirement intake and mission-control workflow suite for Codex.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "lint:syntax": "node --check plugins/supermaestro/scripts/supermaestro.js && node --check plugins/supermaestro/skills/mission-control/scripts/harness.js && node --check plugins/supermaestro/skills/mission-control/scripts/check-reviewability.js && node --check plugins/supermaestro/skills/mission-control/scripts/inspect-ui.js && node --check plugins/supermaestro/skills/lanhu-export/scripts/lanhu-export.mjs",
+    "test": "npm run lint:syntax && node tests/supermaestro-smoke.test.js && node plugins/supermaestro/skills/mission-control/scripts/harness.test.js && node plugins/supermaestro/skills/mission-control/scripts/check-reviewability.test.js"
+  },
+  "bin": {
+    "supermaestro": "plugins/supermaestro/scripts/supermaestro.js",
+    "lanhu-export": "plugins/supermaestro/skills/lanhu-export/scripts/lanhu-export.mjs"
+  }
+}
