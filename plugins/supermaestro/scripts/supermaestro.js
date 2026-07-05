@@ -3,22 +3,32 @@
 const fs = require('fs');
 const path = require('path');
 
-const WORKFLOW_VERSION = 1;
+const WORKFLOW_VERSION = 2;
+const VALID_MODES = new Set(['lite', 'standard', 'strict']);
+const DEFAULT_MODE = 'standard';
+const DEFAULT_POLICY = 'superpowers';
+const POLICY_DIR = path.join(__dirname, '..', 'policies');
 const GENERATED_WORKBENCH_DIRS = new Set(['gates', 'plans', 'reports', 'reviews', 'specs', 'ui', 'workbench']);
 const API_MATERIAL_NAME_RE = /(api|swagger|openapi|postman|mock|interface|interfaces|接口|后端|联调|knife4j)/i;
 const SUPERPOWER_EVIDENCE_RE = /(已读取|已调用|已使用|已吸收|已执行|已完成|used|loaded|applied|executed|completed)/i;
-const SUPERPOWER_SKILLS = {
-  writingPlans: 'superpowers:writing-plans',
-  subagentDrivenDevelopment: 'superpowers:subagent-driven-development',
-  executingPlans: 'superpowers:executing-plans',
-  testDrivenDevelopment: 'superpowers:test-driven-development',
-  systematicDebugging: 'superpowers:systematic-debugging',
-  requestingCodeReview: 'superpowers:requesting-code-review',
-  receivingCodeReview: 'superpowers:receiving-code-review',
-  verificationBeforeCompletion: 'superpowers:verification-before-completion',
-  finishingDevelopmentBranch: 'superpowers:finishing-a-development-branch'
+
+const GATE_ALIASES = {
+  gate1: 'scope',
+  gate2: 'plan',
+  gate3: 'review',
+  gate4: 'final'
 };
+
+const LEGACY_GATE_NAMES = {
+  scope: 'gate1',
+  plan: 'gate2',
+  review: 'gate3',
+  final: 'gate4'
+};
+
 const DEFAULT_STATE = {
+  workflowVersion: WORKFLOW_VERSION,
+  mode: DEFAULT_MODE,
   phase: 'initialized',
   gates: {
     gate1: 'pending',
@@ -32,11 +42,19 @@ const DEFAULT_STATE = {
     subagents: false,
     checkpoint: false
   },
+  policies: {
+    [DEFAULT_POLICY]: {
+      enabled: true,
+      enforcement: 'hard'
+    }
+  },
   checks: {
     workbench: 'unknown',
     reviewability: 'unknown',
-    validation: 'unknown'
-  }
+    validation: 'unknown',
+    policy: 'unknown'
+  },
+  artifacts: {}
 };
 
 main();
@@ -55,8 +73,9 @@ function main() {
 
     const workbench = path.resolve(process.cwd(), workbenchArg);
     const options = parseArgs(args);
+    const normalized = normalizeCommand(command);
 
-    switch (command) {
+    switch (normalized) {
       case 'init':
         init(workbench, options);
         break;
@@ -69,14 +88,17 @@ function main() {
       case 'resume':
         resume(workbench);
         break;
+      case 'scaffold':
+        scaffold(workbench, options);
+        break;
       case 'check-workbench':
         checkWorkbench(workbench);
         break;
-      case 'approve-gate1':
-        approveGate1(workbench, options);
+      case 'approve-scope':
+        approveScope(workbench, options);
         break;
-      case 'approve-gate2':
-        approveGate2(workbench, options);
+      case 'approve-plan':
+        approvePlan(workbench, options);
         break;
       case 'check':
         checkAction(workbench, options);
@@ -84,17 +106,21 @@ function main() {
       case 'verify':
         verify(workbench, options);
         break;
-      case 'request-gate3':
-        requestGate3(workbench, options);
+      case 'request-review':
+        requestReview(workbench, options);
         break;
-      case 'approve-gate3':
-        approveGate3(workbench, options);
+      case 'approve-review':
+        approveReview(workbench, options);
         break;
-      case 'request-gate4':
-        requestGate4(workbench, options);
+      case 'request-final':
+        requestFinal(workbench, options);
         break;
-      case 'approve-gate4':
-        approveGate4(workbench, options);
+      case 'approve-final':
+        approveFinal(workbench, options);
+        break;
+      case 'evidence':
+      case 'evidence-add':
+        addEvidenceCommand(workbench, options);
         break;
       default:
         throw new Error(`Unknown command: ${command}`);
@@ -105,39 +131,103 @@ function main() {
   }
 }
 
+function normalizeCommand(command) {
+  const aliases = {
+    'approve-gate1': 'approve-scope',
+    'approve-gate2': 'approve-plan',
+    'request-gate3': 'request-review',
+    'approve-gate3': 'approve-review',
+    'request-gate4': 'request-final',
+    'approve-gate4': 'approve-final'
+  };
+  return aliases[command] || command;
+}
+
 function init(workbench, options) {
   ensureDir(workbench);
-  ensureDir(path.join(workbench, 'events'));
   ensureDir(path.join(workbench, 'gates'));
-  ensureDir(path.join(workbench, 'plans'));
-  ensureDir(path.join(workbench, 'reviews'));
-  ensureDir(path.join(workbench, 'reports'));
-  ensureDir(path.join(workbench, 'specs'));
 
+  const mode = normalizeMode(options.mode || DEFAULT_MODE);
   const state = loadState(workbench, {
-    ...DEFAULT_STATE,
+    ...deepClone(DEFAULT_STATE),
     workflowVersion: WORKFLOW_VERSION,
-    name: options.name || path.basename(path.dirname(workbench)),
+    mode,
+    gates: initialGatesForMode(mode),
+    name: options.name || path.basename(requirementRoot(workbench)),
     workbench,
     createdAt: now(),
     updatedAt: now()
   });
 
+  state.workflowVersion = state.workflowVersion || WORKFLOW_VERSION;
+  state.mode = normalizeMode(options.mode || state.mode || DEFAULT_MODE);
+  state.policies = normalizePolicies(options, state.policies);
+  state.artifacts = state.artifacts || {};
+  state.checks = state.checks || deepClone(DEFAULT_STATE.checks);
+  state.updatedAt = now();
+
   saveState(workbench, state);
   writeProjection(workbench, state);
-  appendEvent(workbench, 'init', { name: state.name });
+  appendEvent(workbench, 'init', { name: state.name, mode: state.mode, policies: state.policies });
+
+  if (readBoolean(options.scaffold, false)) {
+    scaffold(workbench, options);
+  }
+
   console.log(`Initialized SuperMaestro workbench: ${workbench}`);
+  console.log(`Mode: ${state.mode}`);
+}
+
+function initialGatesForMode(mode) {
+  if (mode === 'lite') {
+    return {
+      gate1: 'pending',
+      gate2: 'skipped',
+      gate3: 'skipped',
+      gate4: 'locked'
+    };
+  }
+  return deepClone(DEFAULT_STATE.gates);
+}
+
+function normalizeMode(mode) {
+  const value = String(mode || DEFAULT_MODE).trim().toLowerCase();
+  if (!VALID_MODES.has(value)) {
+    throw new Error(`Invalid workflow mode: ${mode}. Expected one of: ${Array.from(VALID_MODES).join(', ')}`);
+  }
+  return value;
+}
+
+function normalizePolicies(options, existingPolicies) {
+  const policies = { ...(existingPolicies || {}) };
+  const names = String(options.policies || options.policy || DEFAULT_POLICY)
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+  const enforcement = options.policyEnforcement || options.enforcement || 'hard';
+  for (const name of names) {
+    policies[name] = {
+      enabled: !['false', 'off', 'disabled'].includes(String(options[`${name}Enabled`] || 'true').toLowerCase()),
+      enforcement: ['hard', 'warn', 'off'].includes(String(enforcement).toLowerCase()) ? String(enforcement).toLowerCase() : 'hard'
+    };
+  }
+  if (!Object.keys(policies).length) {
+    policies[DEFAULT_POLICY] = { enabled: true, enforcement: 'hard' };
+  }
+  return policies;
 }
 
 function status(workbench) {
   const state = requireState(workbench);
   console.log(`Name: ${state.name}`);
+  console.log(`Mode: ${state.mode || DEFAULT_MODE}`);
   console.log(`Phase: ${state.phase}`);
-  console.log(`Gate 1: ${state.gates.gate1}`);
-  console.log(`Gate 2: ${state.gates.gate2}`);
-  console.log(`Gate 3: ${state.gates.gate3}`);
-  console.log(`Gate 4: ${state.gates.gate4}`);
-  console.log(`Mode: ${state.execution.mode || '-'}`);
+  console.log(`Scope: ${state.gates.gate1}`);
+  console.log(`Plan: ${state.gates.gate2}`);
+  console.log(`Review: ${state.gates.gate3}`);
+  console.log(`Final: ${state.gates.gate4}`);
+  console.log(`Mode: ${state.execution?.mode || '-'}`);
+  console.log(`Policies: ${enabledPolicyNames(state).join(', ') || '-'}`);
   console.log(`Workbench: ${workbench}`);
 }
 
@@ -151,138 +241,231 @@ function resume(workbench) {
   const state = requireState(workbench);
   writeProjection(workbench, state);
   console.log(`Resume ${state.name}: ${state.phase}`);
+  console.log(`Mode: ${state.mode || DEFAULT_MODE}`);
   console.log(recommendNext(state));
+}
+
+function scaffold(workbench, options) {
+  const state = requireState(workbench);
+  const mode = normalizeMode(options.mode || state.mode || DEFAULT_MODE);
+  const triggers = detectArtifactTriggers(workbench, options, mode);
+  const artifacts = requiredArtifactsFor(mode, triggers);
+  const created = [];
+
+  for (const artifact of artifacts) {
+    const file = path.join(workbench, artifact.path);
+    if (!hasNonEmptyFile(file)) {
+      writeIfMissing(file, artifact.content(state, triggers));
+      created.push(artifact.path);
+    }
+  }
+
+  state.mode = mode;
+  state.artifacts = {
+    ...(state.artifacts || {}),
+    triggers,
+    files: Array.from(new Set([...(state.artifacts?.files || []), ...artifacts.map(item => item.path)])).sort(),
+    scaffoldedAt: now()
+  };
+  state.updatedAt = now();
+  saveState(workbench, state);
+  writeProjection(workbench, state);
+  appendEvent(workbench, 'scaffold', { mode, triggers, created });
+  console.log(`Scaffolded ${created.length} artifact(s) for ${mode} mode.`);
+  if (created.length) {
+    for (const file of created) console.log(`- ${file}`);
+  }
+}
+
+function detectArtifactTriggers(workbench, options, mode) {
+  const api = readBoolean(options.api, hasApiMaterial(workbench));
+  const ui = readBoolean(options.ui, hasUiManifest(workbench));
+  return {
+    mode,
+    api,
+    ui,
+    uiCoding: readBoolean(options.uiCoding || options.uiCode || options.ui, ui && mode === 'strict'),
+    behavior: readBoolean(options.behavior, mode !== 'lite'),
+    review: readBoolean(options.review, mode !== 'lite'),
+    worktree: readBoolean(options.worktree, false),
+    subagents: readBoolean(options.subagents, false),
+    reviewAgent: readBoolean(options.reviewAgent || options.reviewAgentCheckpoint, false),
+    contractChanges: readBoolean(options.contractChanges, false),
+    integration: readBoolean(options.integration, false)
+  };
+}
+
+function requiredArtifactsFor(mode, triggers) {
+  const artifacts = [
+    artifact('reports/evidence.jsonl', () => ''),
+    artifact('reports/validation.md', validationTemplate),
+  ];
+
+  if (mode === 'lite') {
+    artifacts.push(artifact('brief.md', liteBriefTemplate));
+    return artifacts;
+  }
+
+  artifacts.push(
+    artifact('context.md', contextTemplate),
+    artifact('specs/requirement-alignment.md', requirementAlignmentTemplate),
+    artifact('plans/task-plan.md', taskPlanTemplate),
+    artifact('plans/progress.md', progressTemplate),
+    artifact('reviews/review-packs.md', reviewPacksTemplate)
+  );
+
+  if (triggers.review) {
+    artifacts.push(artifact('specs/review-contract.md', reviewContractTemplate));
+    artifacts.push(artifact('specs/review-contract.json', reviewContractJsonTemplate));
+  }
+
+  if (triggers.api) {
+    artifacts.push(artifact('specs/api-contract.md', apiContractTemplate));
+    artifacts.push(artifact('specs/api-contract.json', apiContractJsonTemplate));
+  }
+
+  if (triggers.ui) {
+    artifacts.push(artifact('specs/ui-contract.md', uiContractTemplate));
+    artifacts.push(artifact('specs/ui-contract.json', uiContractJsonTemplate));
+    artifacts.push(artifact('specs/ui-material-index.md', uiMaterialIndexTemplate));
+  }
+
+  if (triggers.uiCoding) {
+    artifacts.push(artifact('specs/ui-schema-extract.md', uiSchemaExtractTemplate));
+    artifacts.push(artifact('specs/ui-schema-map.md', uiSchemaMapTemplate));
+  }
+
+  if (triggers.api && triggers.ui) {
+    artifacts.push(artifact('specs/page-contract-matrix.md', pageContractMatrixTemplate));
+  }
+
+  if (triggers.behavior) {
+    artifacts.push(artifact('specs/behavior-contract.md', behaviorContractTemplate));
+  }
+
+  if (triggers.worktree) artifacts.push(artifact('worktrees/plan.md', worktreePlanTemplate));
+  if (triggers.subagents) artifacts.push(artifact('agents/agent-index.md', agentIndexTemplate));
+  if (triggers.reviewAgent) artifacts.push(artifact('reviews/code-review/README.md', codeReviewReadmeTemplate));
+  if (triggers.contractChanges) artifacts.push(artifact('contract-changes/README.md', contractChangesTemplate));
+  if (triggers.integration) artifacts.push(artifact('integration/plan.md', integrationPlanTemplate));
+
+  return artifacts;
+}
+
+function artifact(pathName, content) {
+  return { path: pathName, content };
 }
 
 function checkWorkbench(workbench) {
   const state = requireState(workbench);
   state.checks = { ...(state.checks || {}) };
 
-  const required = requiredWorkbenchFiles(workbench);
-  const missing = required.filter(file => !hasNonEmptyFile(resolveWorkbenchRef(workbench, file)));
-  const missingAlternatives = requiredWorkbenchAlternatives(workbench)
+  const missing = requiredWorkbenchFiles(workbench, state).filter(file => !hasNonEmptyFile(resolveWorkbenchRef(workbench, file)));
+  const missingAlternatives = requiredWorkbenchAlternatives(workbench, state)
     .filter(entry => !entry.refs.some(ref => hasNonEmptyFile(resolveWorkbenchRef(workbench, ref))))
     .map(entry => entry.label);
   const allMissing = missing.concat(missingAlternatives);
 
   if (allMissing.length) {
-    recordWorkbenchCheck(workbench, state, 'failed', allMissing, `Workbench check failed. Missing or empty: ${allMissing.join(', ')}`);
+    failWorkbenchCheck(workbench, state, allMissing, `Workbench check failed. Missing or empty: ${allMissing.join(', ')}`);
   }
 
   try {
-    validateRequirementAlignment(workbench);
-    validateGate1BrainstormingFanIn(workbench);
+    if (isLite(state)) {
+      validateLiteBrief(workbench);
+    } else {
+      validateRequirementAlignment(workbench);
+      validateGate1BrainstormingFanIn(workbench);
+    }
   } catch (error) {
-    recordWorkbenchCheck(workbench, state, 'failed', allMissing, error.message);
+    failWorkbenchCheck(workbench, state, allMissing, error.message);
   }
 
-  recordWorkbenchCheck(workbench, state, 'passed', [], null);
+  state.checks.workbench = 'passed';
+  state.checks.workbenchMissing = [];
+  delete state.checks.workbenchError;
+  state.updatedAt = now();
+  saveState(workbench, state);
+  appendEvent(workbench, 'check-workbench', { result: 'passed', missing: [] });
   console.log('Workbench check passed.');
 }
 
-function recordWorkbenchCheck(workbench, state, result, missing, errorMessage) {
-  state.checks.workbench = result;
+function failWorkbenchCheck(workbench, state, missing, message) {
+  state.checks.workbench = 'failed';
   state.checks.workbenchMissing = missing;
-  if (errorMessage) {
-    state.checks.workbenchError = errorMessage;
-  } else {
-    delete state.checks.workbenchError;
-  }
+  state.checks.workbenchError = message;
   state.updatedAt = now();
   saveState(workbench, state);
-  appendEvent(workbench, 'check-workbench', { result, missing, error: errorMessage || undefined });
-
-  if (errorMessage) {
-    throw new Error(errorMessage);
-  }
+  appendEvent(workbench, 'check-workbench', { result: 'failed', missing, error: message });
+  throw new Error(message);
 }
 
-function approveGate1(workbench, options) {
+function approveScope(workbench, options) {
   const state = requireState(workbench);
   if (state.gates.gate1 === 'approved') {
-    console.log('Gate 1 is already approved.');
+    console.log('Scope gate is already approved.');
     return;
   }
-  if (!['initialized', 'gate1_pending'].includes(state.phase)) {
-    throw new Error(`Cannot approve Gate 1 from phase: ${state.phase}`);
+  if (!['initialized', 'gate1_pending', 'scope_pending'].includes(state.phase)) {
+    throw new Error(`Cannot approve Scope gate from phase: ${state.phase}`);
   }
-
-  const confirmedBy = String(options.confirmedBy || options.by || '').trim();
-  const confirmationText = String(options.confirmation || '').trim();
-  if (confirmedBy !== 'user') {
-    throw new Error('Gate 1 approval requires --confirmed-by user after explicit user confirmation.');
-  }
-  if (confirmationText.length < 6) {
-    throw new Error('Gate 1 approval requires --confirmation "<用户确认原话或摘要>".');
-  }
-
+  requireUserConfirmation(options, 'Scope gate');
   checkWorkbench(workbench);
+
   const nextState = requireState(workbench);
-  nextState.phase = 'gate1_approved';
+  nextState.phase = 'scope_approved';
   nextState.gates.gate1 = 'approved';
-  nextState.gates.gate2 = 'pending';
-  nextState.humanConfirmations = {
-    ...(nextState.humanConfirmations || {}),
-    gate1: {
-      confirmedBy,
-      confirmationText,
-      confirmedAt: now()
-    }
-  };
+  if (isLite(nextState)) {
+    nextState.gates.gate2 = 'skipped';
+    nextState.gates.gate3 = 'skipped';
+    nextState.gates.gate4 = 'pending';
+  } else {
+    nextState.gates.gate2 = 'pending';
+  }
+  recordHumanConfirmation(nextState, 'gate1', options);
   nextState.updatedAt = now();
   saveState(workbench, nextState);
-  writeGateDecision(workbench, 1, nextState, options);
+  writeGateDecision(workbench, 1, nextState, options, 'scope');
   writeProjection(workbench, nextState);
-  appendEvent(workbench, 'approve-gate1', { confirmedBy });
-  console.log('Gate 1 requirement-alignment approved.');
+  appendEvent(workbench, 'gate.approved', { gate: 'scope', confirmedBy: 'user' });
+  console.log('Scope gate approved.');
 }
 
-function approveGate2(workbench, options) {
+function approvePlan(workbench, options) {
   const state = requireState(workbench);
-  if (state.gates.gate1 !== 'approved') {
-    throw new Error('Cannot approve Gate 2 before Gate 1 requirement alignment is approved.');
-  }
-  if (state.gates.gate2 === 'approved') {
-    console.log('Gate 2 is already approved.');
+  if (isLite(state)) {
+    console.log('Plan gate is skipped in lite mode.');
     return;
   }
-  const confirmedBy = String(options.confirmedBy || options.by || '').trim();
-  const confirmationText = String(options.confirmation || '').trim();
-  if (confirmedBy !== 'user') {
-    throw new Error('Gate 2 approval requires --confirmed-by user after explicit user confirmation.');
+  if (state.gates.gate1 !== 'approved') {
+    throw new Error('Cannot approve Plan gate before Scope gate is approved.');
   }
-  if (confirmationText.length < 6) {
-    throw new Error('Gate 2 approval requires --confirmation "<用户确认原话或摘要>".');
+  if (state.gates.gate2 === 'approved') {
+    console.log('Plan gate is already approved.');
+    return;
   }
-
+  requireUserConfirmation(options, 'Plan gate');
   checkWorkbench(workbench);
   validatePlanWorkbench(workbench);
-  validateSuperpowerEvidence(workbench, [SUPERPOWER_SKILLS.writingPlans], 'approve-gate2');
+  validatePolicyEvidence(workbench, 'gate.plan.approve', 'approve-plan');
 
   const nextState = requireState(workbench);
-  nextState.phase = 'gate2_approved';
+  nextState.phase = 'plan_approved';
   nextState.gates.gate2 = 'approved';
   nextState.gates.gate3 = 'pending';
   nextState.execution = {
-    mode: options.mode || 'main-serial',
+    mode: options.mode || options.executionMode || 'main-serial',
     worktree: readBoolean(options.worktree, false),
     subagents: readBoolean(options.subagents, false),
     checkpoint: readBoolean(options.checkpoint, false)
   };
-  nextState.humanConfirmations = {
-    ...(nextState.humanConfirmations || {}),
-    gate2: {
-      confirmedBy,
-      confirmationText,
-      confirmedAt: now()
-    }
-  };
+  recordHumanConfirmation(nextState, 'gate2', options);
   nextState.updatedAt = now();
   saveState(workbench, nextState);
-  writeGateDecision(workbench, 2, nextState, options);
+  writeGateDecision(workbench, 2, nextState, options, 'plan');
   writeProjection(workbench, nextState);
-  appendEvent(workbench, 'approve-gate2', nextState.execution);
-  console.log('Gate 2 plan approved.');
+  appendEvent(workbench, 'gate.approved', { gate: 'plan', execution: nextState.execution });
+  console.log('Plan gate approved.');
 }
 
 function checkAction(workbench, options) {
@@ -291,18 +474,21 @@ function checkAction(workbench, options) {
   if (!action) throw new Error('Missing --action.');
 
   if (action === 'code') {
-    requireGate(state, 'gate2');
-    validateCodeMode(workbench, options);
-    validateSuperpowerEvidence(
-      workbench,
-      [
-        SUPERPOWER_SKILLS.testDrivenDevelopment,
-        state.execution?.subagents === true
-          ? SUPERPOWER_SKILLS.subagentDrivenDevelopment
-          : SUPERPOWER_SKILLS.executingPlans
-      ],
-      'code'
-    );
+    requireCodingGate(state);
+    if (hasUiManifest(workbench) && options.ui !== 'true') {
+      const nonUi = options.nonUi === true || options.nonUi === 'true';
+      const reason = String(options.reason || '').trim();
+      if (!nonUi || reason.length < 6) {
+        throw new Error('UI materials detected. Non-UI code checks require --non-ui true --reason "<原因>"; UI code checks require --ui true and --schema-extract.');
+      }
+    }
+    if (options.ui === 'true' && !options.schemaExtract) {
+      throw new Error('UI coding requires --schema-extract.');
+    }
+    if (options.ui === 'true') {
+      validateUiSchemaExtract(workbench, options.schemaExtract);
+    }
+    validatePolicyEvidence(workbench, 'action.code', 'code');
     console.log('ALLOW code');
     return;
   }
@@ -310,24 +496,16 @@ function checkAction(workbench, options) {
   if (action === 'dispatch-subagent') {
     requireGate(state, 'gate2');
     if (state.execution?.subagents !== true) {
-      throw new Error('Gate 2 execution mode did not enable subagents. Re-run approve-gate2 with --subagents true after user confirmation.');
+      throw new Error('Gate 2 execution mode did not enable subagents.');
     }
-    validateSuperpowerEvidence(
-      workbench,
-      [SUPERPOWER_SKILLS.subagentDrivenDevelopment],
-      'dispatch-subagent'
-    );
+    validatePolicyEvidence(workbench, 'action.dispatch-subagent', 'dispatch-subagent');
     console.log('ALLOW dispatch-subagent');
     return;
   }
 
   if (['commit', 'merge', 'push', 'cleanup'].includes(action)) {
     requireGate(state, 'gate4');
-    validateSuperpowerEvidence(
-      workbench,
-      [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
-      action
-    );
+    validatePolicyEvidence(workbench, 'action.final', action);
     console.log(`ALLOW ${action}`);
     return;
   }
@@ -337,45 +515,36 @@ function checkAction(workbench, options) {
 
 function verify(workbench, options) {
   const state = requireState(workbench);
-  requireGate(state, 'gate2');
+  requireCodingGate(state);
 
   const reviewPack = options.reviewPack || 'reviews/review-packs.md';
   const validation = options.validation || 'reports/validation.md';
-  const missing = [reviewPack, validation].filter(file => !hasNonEmptyFile(path.join(workbench, file)));
-  const requiredSuperpowers = [
-    SUPERPOWER_SKILLS.testDrivenDevelopment,
-    SUPERPOWER_SKILLS.verificationBeforeCompletion,
-    state.execution?.subagents === true
-      ? SUPERPOWER_SKILLS.subagentDrivenDevelopment
-      : SUPERPOWER_SKILLS.executingPlans
-  ];
-  if (hasFailureOrReviewFinding(workbench)) requiredSuperpowers.push(SUPERPOWER_SKILLS.systematicDebugging);
-  if (state.execution?.subagents === true || hasReviewAgentWork(workbench)) {
-    requiredSuperpowers.push(SUPERPOWER_SKILLS.requestingCodeReview);
-  }
-  if (/changes-requested|changes requested/i.test(superpowerEvidenceText(workbench))) {
-    requiredSuperpowers.push(SUPERPOWER_SKILLS.receivingCodeReview);
-  }
-  const missingSuperpowers = missingSuperpowerEvidence(workbench, Array.from(new Set(requiredSuperpowers)));
+  const required = [validation];
+  if (!isLite(state)) required.unshift(reviewPack);
+  const missing = required.filter(file => !hasNonEmptyFile(path.join(workbench, file)));
+
+  const policyResult = checkPolicyEvidence(workbench, 'gate.review.request');
+  const hardPolicyFailures = policyResult.failures.filter(item => item.enforcement === 'hard');
 
   state.checks.reviewability = missing.length ? 'failed' : 'passed';
-  state.checks.validation = missing.length || missingSuperpowers.length ? 'failed' : 'passed';
+  state.checks.validation = missing.length || hardPolicyFailures.length ? 'failed' : 'passed';
   state.checks.verifyMissing = missing;
+  state.checks.policyMissing = policyResult.failures;
 
-  if (missing.length || missingSuperpowers.length) {
+  if (missing.length || hardPolicyFailures.length) {
     state.updatedAt = now();
     saveState(workbench, state);
     appendEvent(workbench, 'verify', {
       strict: readBoolean(options.strict, false),
       result: 'failed',
       missing,
-      missingSuperpowers
+      policyMissing: policyResult.failures
     });
     const fileText = missing.length ? `Missing or empty: ${missing.join(', ')}` : '';
-    const superpowerText = missingSuperpowers.length
-      ? `Missing Superpowers evidence: ${missingSuperpowers.join(', ')}`
+    const policyText = hardPolicyFailures.length
+      ? `Missing policy evidence: ${hardPolicyFailures.map(item => item.label).join(', ')}`
       : '';
-    throw new Error(`Verify failed. ${[fileText, superpowerText].filter(Boolean).join('; ')}`);
+    throw new Error(`Verify failed. ${[fileText, policyText].filter(Boolean).join('; ')}`);
   }
 
   validateVisualEvidence(workbench, validation);
@@ -384,78 +553,87 @@ function verify(workbench, options) {
   appendEvent(workbench, 'verify', {
     strict: readBoolean(options.strict, false),
     result: 'passed',
-    missing
+    missing,
+    warnings: policyResult.failures.filter(item => item.enforcement === 'warn')
   });
 
   console.log('Verify passed.');
+  if (policyResult.failures.some(item => item.enforcement === 'warn')) {
+    console.log(`Warnings: ${policyResult.failures.map(item => item.label).join(', ')}`);
+  }
 }
 
-function requestGate3(workbench, options) {
+function requestReview(workbench, options) {
   const state = requireState(workbench);
+  if (isLite(state)) {
+    console.log('Review gate is skipped in lite mode. Use request-final after verification.');
+    return;
+  }
   requireGate(state, 'gate2');
   verify(workbench, options);
 
   const nextState = requireState(workbench);
-  nextState.phase = 'gate3_pending';
+  nextState.phase = 'review_pending';
   nextState.gates.gate3 = 'review_requested';
   nextState.updatedAt = now();
   saveState(workbench, nextState);
-  writeGateDecision(workbench, 3, nextState, options);
+  writeGateDecision(workbench, 3, nextState, options, 'review');
   writeProjection(workbench, nextState);
-  appendEvent(workbench, 'request-gate3', {});
-  console.log('Gate 3 requested.');
+  appendEvent(workbench, 'gate.requested', { gate: 'review' });
+  console.log('Review gate requested.');
 }
 
-function approveGate3(workbench, options) {
+function approveReview(workbench, options) {
   const state = requireState(workbench);
+  if (isLite(state)) {
+    console.log('Review gate is skipped in lite mode.');
+    return;
+  }
   if (state.gates.gate3 !== 'review_requested') {
-    throw new Error('Gate 3 is not pending. Run request-gate3 first.');
+    throw new Error('Review gate is not pending. Run request-review first.');
   }
   const reviewAccepted = readBoolean(options.review, true);
   const validationAccepted = readBoolean(options.validation, true);
   if (!reviewAccepted || !validationAccepted) {
-    throw new Error('Gate 3 approval requires review and validation to be accepted.');
+    throw new Error('Review gate approval requires review and validation to be accepted.');
   }
-  state.phase = 'gate3_approved';
+  state.phase = 'review_approved';
   state.gates.gate3 = 'approved';
   state.gates.gate4 = 'pending';
   state.updatedAt = now();
   saveState(workbench, state);
-  writeGateDecision(workbench, 3, state, options);
+  writeGateDecision(workbench, 3, state, options, 'review');
   writeProjection(workbench, state);
-  appendEvent(workbench, 'approve-gate3', {});
-  console.log('Gate 3 review approved.');
+  appendEvent(workbench, 'gate.approved', { gate: 'review' });
+  console.log('Review gate approved.');
 }
 
-function requestGate4(workbench, options) {
+function requestFinal(workbench, options) {
   const state = requireState(workbench);
-  requireGate(state, 'gate3');
-  validateSuperpowerEvidence(
-    workbench,
-    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
-    'request-gate4'
-  );
-  state.phase = 'gate4_pending';
+  if (isLite(state)) {
+    requireGate(state, 'gate1');
+    verify(workbench, options);
+  } else {
+    requireGate(state, 'gate3');
+  }
+  validatePolicyEvidence(workbench, 'gate.final.request', 'request-final');
+  state.phase = 'final_pending';
   state.gates.gate4 = 'final_requested';
   state.updatedAt = now();
   saveState(workbench, state);
-  writeGateDecision(workbench, 4, state, options);
+  writeGateDecision(workbench, 4, state, options, 'final');
   writeProjection(workbench, state);
-  appendEvent(workbench, 'request-gate4', {});
-  console.log('Gate 4 requested.');
+  appendEvent(workbench, 'gate.requested', { gate: 'final' });
+  console.log('Final gate requested.');
 }
 
-function approveGate4(workbench, options) {
+function approveFinal(workbench, options) {
   const state = requireState(workbench);
   if (state.gates.gate4 !== 'final_requested') {
-    throw new Error('Gate 4 is not pending. Run request-gate4 first.');
+    throw new Error('Final gate is not pending. Run request-final first.');
   }
-  validateSuperpowerEvidence(
-    workbench,
-    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
-    'approve-gate4'
-  );
-  state.phase = 'gate4_approved';
+  validatePolicyEvidence(workbench, 'gate.final.approve', 'approve-final');
+  state.phase = 'final_approved';
   state.gates.gate4 = 'approved';
   state.finalActions = {
     merge: readBoolean(options.merge, false),
@@ -465,10 +643,197 @@ function approveGate4(workbench, options) {
   };
   state.updatedAt = now();
   saveState(workbench, state);
-  writeGateDecision(workbench, 4, state, options);
+  writeGateDecision(workbench, 4, state, options, 'final');
   writeProjection(workbench, state);
-  appendEvent(workbench, 'approve-gate4', state.finalActions);
-  console.log('Gate 4 final-action approved.');
+  appendEvent(workbench, 'gate.approved', { gate: 'final', finalActions: state.finalActions });
+  console.log('Final gate approved.');
+}
+
+function addEvidenceCommand(workbench, options) {
+  requireState(workbench);
+  const type = options.type || 'skill.used';
+  const entry = {
+    type,
+    at: now(),
+    phase: options.phase || '',
+    skill: options.skill || '',
+    command: options.command || '',
+    result: options.result || '',
+    summary: options.summary || options.reason || '',
+    source: options.source || 'agent'
+  };
+  if (type.startsWith('skill.') && !entry.skill) {
+    throw new Error('Skill evidence requires --skill.');
+  }
+  if (type === 'skill.skipped' && !entry.summary) {
+    throw new Error('Skipped skill evidence requires --summary or --reason.');
+  }
+  appendEvidence(workbench, entry);
+  appendEvent(workbench, 'evidence.added', { type: entry.type, skill: entry.skill, phase: entry.phase });
+  console.log(`Evidence added: ${entry.type}${entry.skill ? ` ${entry.skill}` : ''}`);
+}
+
+function requireCodingGate(state) {
+  if (isLite(state)) {
+    requireGate(state, 'gate1');
+    return;
+  }
+  requireGate(state, 'gate2');
+}
+
+function isLite(state) {
+  return normalizeMode(state.mode || DEFAULT_MODE) === 'lite';
+}
+
+function requireUserConfirmation(options, label) {
+  const confirmedBy = String(options.confirmedBy || options.by || '').trim();
+  const confirmationText = String(options.confirmation || '').trim();
+  if (confirmedBy !== 'user') {
+    throw new Error(`${label} approval requires --confirmed-by user after explicit user confirmation.`);
+  }
+  if (confirmationText.length < 6) {
+    throw new Error(`${label} approval requires --confirmation "<用户确认原话或摘要>".`);
+  }
+}
+
+function recordHumanConfirmation(state, gate, options) {
+  state.humanConfirmations = {
+    ...(state.humanConfirmations || {}),
+    [gate]: {
+      confirmedBy: String(options.confirmedBy || options.by || '').trim(),
+      confirmationText: String(options.confirmation || '').trim(),
+      confirmedAt: now()
+    }
+  };
+}
+
+function validatePlanWorkbench(workbench) {
+  const required = [
+    'plans/task-plan.md',
+    'plans/progress.md',
+    'reviews/review-packs.md',
+    'reports/validation.md'
+  ];
+  const missing = required.filter(file => !hasNonEmptyFile(path.join(workbench, file)));
+  if (missing.length) {
+    throw new Error(`Plan gate check failed. Missing or empty: ${missing.join(', ')}`);
+  }
+}
+
+function enabledPolicyNames(state) {
+  return Object.entries(state.policies || {})
+    .filter(([, config]) => config && config.enabled !== false && config.enforcement !== 'off')
+    .map(([name]) => name);
+}
+
+function loadPolicy(name) {
+  const file = path.join(POLICY_DIR, `${name}.policy.json`);
+  if (!fs.existsSync(file)) {
+    throw new Error(`Policy not found: ${name} (${file})`);
+  }
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function checkPolicyEvidence(workbench, eventName) {
+  const state = requireState(workbench);
+  const failures = [];
+  const warnings = [];
+  for (const [name, config] of Object.entries(state.policies || {})) {
+    if (!config || config.enabled === false || config.enforcement === 'off') continue;
+    const policy = loadPolicy(name);
+    const requirements = requirementsForEvent(policy, eventName, state);
+    for (const requirement of requirements) {
+      if (!matchesWhen(requirement.when, state)) continue;
+      const result = checkRequirementEvidence(workbench, requirement);
+      if (result.ok) continue;
+      const enforcement = requirement.enforcement || config.enforcement || policy.defaultEnforcement || 'hard';
+      const item = {
+        policy: name,
+        event: eventName,
+        label: result.label,
+        enforcement
+      };
+      failures.push(item);
+      if (enforcement === 'warn') warnings.push(item);
+    }
+  }
+  return { failures, warnings };
+}
+
+function validatePolicyEvidence(workbench, eventName, action) {
+  const result = checkPolicyEvidence(workbench, eventName);
+  const hardFailures = result.failures.filter(item => item.enforcement === 'hard');
+  const warnFailures = result.failures.filter(item => item.enforcement === 'warn');
+  const state = requireState(workbench);
+  state.checks = { ...(state.checks || {}) };
+  state.checks.policy = hardFailures.length ? 'failed' : 'passed';
+  state.checks.policyMissing = result.failures;
+  state.updatedAt = now();
+  saveState(workbench, state);
+  appendEvent(workbench, 'policy.check', { event: eventName, result: hardFailures.length ? 'failed' : 'passed', failures: result.failures });
+  if (hardFailures.length) {
+    throw new Error(
+      `DENY ${action}: 缺少 policy evidence：${hardFailures.map(item => item.label).join(', ')}。请先实际读取/调用对应 skill，并记录到 reports/evidence.jsonl；迁移期也兼容 reports/validation.md。`
+    );
+  }
+  if (warnFailures.length) {
+    console.log(`Policy warnings: ${warnFailures.map(item => item.label).join(', ')}`);
+  }
+}
+
+function requirementsForEvent(policy, eventName, state) {
+  const requirements = policy.requirements || {};
+  const mode = normalizeMode(state.mode || DEFAULT_MODE);
+  const common = asArray(requirements[eventName]);
+  const byMode = asArray(requirements[`${eventName}#${mode}`]);
+  return common.concat(byMode);
+}
+
+function checkRequirementEvidence(workbench, requirement) {
+  if (requirement.skill) {
+    const ok = hasSkillEvidence(workbench, requirement.skill, requirement.allowSkipWithReason);
+    return { ok, label: requirement.skill };
+  }
+  if (requirement.oneOf) {
+    const skills = asArray(requirement.oneOf);
+    const ok = skills.some(skill => hasSkillEvidence(workbench, skill, requirement.allowSkipWithReason));
+    return { ok, label: `one of ${skills.join(' | ')}` };
+  }
+  return { ok: true, label: 'unknown requirement' };
+}
+
+function hasSkillEvidence(workbench, skill, allowSkipWithReason) {
+  const evidence = readEvidence(workbench);
+  const structured = evidence.some(entry => {
+    if (entry.skill !== skill) return false;
+    if (['skill.used', 'skill.applied', 'skill.loaded'].includes(entry.type)) return true;
+    if (allowSkipWithReason && entry.type === 'skill.skipped' && String(entry.summary || entry.reason || '').trim().length >= 6) return true;
+    return false;
+  });
+  if (structured) return true;
+  return hasLegacySuperpowerEvidence(superpowerEvidenceText(workbench), skill, allowSkipWithReason);
+}
+
+function readEvidence(workbench) {
+  const file = path.join(workbench, 'reports', 'evidence.jsonl');
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return { type: 'parse-error', raw: line };
+      }
+    });
+}
+
+function appendEvidence(workbench, entry) {
+  const file = path.join(workbench, 'reports', 'evidence.jsonl');
+  ensureDir(path.dirname(file));
+  fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
 }
 
 function superpowerEvidenceText(workbench) {
@@ -483,8 +848,12 @@ function superpowerEvidenceText(workbench) {
     .join('\n\n');
 }
 
-function hasSuperpowerEvidence(content, skill) {
+function hasLegacySuperpowerEvidence(content, skill, allowSkipWithReason) {
   const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (allowSkipWithReason) {
+    const skipRe = new RegExp(`${escaped}[\\s\\S]{0,240}(跳过|skip|skipped)[\\s\\S]{0,240}(原因|reason)`, 'i');
+    if (skipRe.test(content)) return true;
+  }
   const sameLineEvidence = content.split(/\r?\n/).some(line => {
     return line.includes(skill) && !/pending\s*\//i.test(line) && SUPERPOWER_EVIDENCE_RE.test(line);
   });
@@ -496,59 +865,45 @@ function hasSuperpowerEvidence(content, skill) {
   return Boolean(match && !/pending\s*\//i.test(match[0]));
 }
 
-function missingSuperpowerEvidence(workbench, skills) {
-  const content = superpowerEvidenceText(workbench);
-  return skills.filter(skill => !hasSuperpowerEvidence(content, skill));
-}
-
-function validateSuperpowerEvidence(workbench, skills, action) {
-  const missing = missingSuperpowerEvidence(workbench, skills);
-  if (!missing.length) return;
-  throw new Error(
-    `DENY ${action}: 缺少 Superpowers 调用证据：${missing.join(', ')}。请先实际读取/调用对应 skill，并在 reports/validation.md 的“Superpowers 调用证据”中记录已读取、已调用或已吸收的证据。`
-  );
-}
-
-function hasFailureOrReviewFinding(workbench) {
-  return /(bug|测试失败|构建失败|联调异常|review finding|changes-requested|changes requested|根因|失败)/i.test(
-    superpowerEvidenceText(workbench)
-  );
-}
-
-function hasReviewAgentWork(workbench) {
-  return /(reviews\/code-review|agent-approved|changes-requested|findings)/i.test(
-    superpowerEvidenceText(workbench)
-  );
+function matchesWhen(when, state) {
+  if (!when) return true;
+  for (const [key, expected] of Object.entries(when)) {
+    const actual = key.split('.').reduce((node, part) => node?.[part], state);
+    if (actual !== expected) return false;
+  }
+  return true;
 }
 
 function recommendNext(state) {
+  const mode = normalizeMode(state.mode || DEFAULT_MODE);
   if (state.gates.gate1 !== 'approved') {
-    return 'Next: complete requirement alignment, run check-workbench, then approve-gate1.';
+    return mode === 'lite'
+      ? 'Next: complete brief.md, run check-workbench, then approve-scope.'
+      : 'Next: complete scope/contract alignment, run check-workbench, then approve-scope.';
+  }
+  if (mode === 'lite') {
+    if (state.gates.gate4 !== 'approved') return 'Next: implement the small change, record validation/evidence, then request-final/approve-final.';
+    return 'Next: final actions may run only after explicit checks.';
   }
   if (state.gates.gate2 !== 'approved') {
-    return 'Next: complete task plan docs and approve-gate2 with execution mode.';
+    return 'Next: complete task plan, review strategy, validation skeleton and approve-plan.';
   }
   if (state.gates.gate3 !== 'approved') {
-    return 'Next: execute approved tasks, fan-in review packs and validation, then run verify/request-gate3.';
+    return 'Next: execute approved tasks, fan-in review packs and validation, then run verify/request-review.';
   }
   if (state.gates.gate4 !== 'approved') {
-    return 'Next: human reviews Gate 3 artifacts, then request/approve Gate 4 final actions.';
+    return 'Next: human reviews Gate Review artifacts, then request/approve Final gate.';
   }
   return 'Next: final actions may run only after explicit checks.';
 }
 
 function requireGate(state, gate) {
   if (state.gates[gate] !== 'approved') {
-    throw new Error(`${gate} is not approved.`);
+    throw new Error(`${GATE_ALIASES[gate] || gate} gate is not approved.`);
   }
-  if (gate === 'gate1' && !hasGateHumanConfirmation(state, 'gate1')) {
+  if ((gate === 'gate1' || gate === 'gate2') && !hasGateHumanConfirmation(state, gate)) {
     throw new Error(
-      'Gate 1 is approved but missing explicit user confirmation. Re-run approve-gate1 with --confirmed-by user --confirmation "<用户确认原话或摘要>".'
-    );
-  }
-  if (gate === 'gate2' && !hasGateHumanConfirmation(state, 'gate2')) {
-    throw new Error(
-      'Gate 2 is approved but missing explicit user confirmation. Re-run approve-gate2 with --confirmed-by user --confirmation "<用户确认原话或摘要>".'
+      `${GATE_ALIASES[gate]} gate is approved but missing explicit user confirmation. Re-run approval with --confirmed-by user --confirmation "<用户确认原话或摘要>".`
     );
   }
 }
@@ -576,75 +931,11 @@ function validateUiSchemaExtract(workbench, schemaExtract) {
   }
 }
 
-function validateCodeMode(workbench, options) {
-  const uiRequested = Boolean(
-    readBoolean(options.ui, false) ||
-      options.boards ||
-      options.schemas ||
-      options.schemaExtract ||
-      options.baselines
-  );
-  const nonUiRequested = readBoolean(options.nonUi, false);
-
-  if (uiRequested && nonUiRequested) {
-    throw new Error('UI code checks and non-UI code checks cannot be used together.');
-  }
-
-  if (hasUiManifest(workbench) && !uiRequested && !nonUiRequested) {
-    throw new Error('UI materials detected. Non-UI code checks require --non-ui true --reason "<原因>"; UI code checks require --ui true --boards --schemas --schema-extract.');
-  }
-
-  if (nonUiRequested) {
-    const reason = String(options.reason || '').trim();
-    if (reason.length < 6) {
-      throw new Error('Non-UI code checks require --non-ui true --reason "<原因>" with a specific reason.');
-    }
-    return;
-  }
-
-  if (uiRequested) {
-    validateUiCodeMode(workbench, options);
-  }
-}
-
-function validateUiCodeMode(workbench, options) {
-  const boards = csv(options.boards);
-  const schemas = csv(options.schemas);
-  const baselines = csv(options.baselines);
-  const schemaOnly = readBoolean(options.schemaOnly, false);
-  const problems = [];
-
-  if (!boards.length) problems.push('missing --boards');
-  if (!schemas.length) problems.push('missing --schemas');
-
-  const missingSchemas = schemas.filter(ref => !hasNonEmptyFile(resolveWorkbenchRef(workbench, ref)));
-  if (missingSchemas.length) {
-    problems.push(`missing or empty schema files: ${missingSchemas.join(', ')}`);
-  }
-
-  if (!options.schemaExtract) {
-    problems.push('missing --schema-extract');
-  }
-
-  const missingBaselines = baselines.filter(ref => !hasNonEmptyFile(resolveWorkbenchRef(workbench, ref)));
-  if (!baselines.length && !schemaOnly) {
-    problems.push('missing --baselines or --schema-only true');
-  } else if (missingBaselines.length && !schemaOnly) {
-    problems.push(`missing or empty baselines: ${missingBaselines.join(', ')}`);
-  }
-
-  if (problems.length) {
-    throw new Error(`UI schema-first check failed: ${problems.join('; ')}`);
-  }
-
-  validateUiSchemaExtract(workbench, options.schemaExtract);
-}
-
 function validateVisualEvidence(workbench, validationRef) {
   if (!hasUiManifest(workbench)) return;
   const file = resolveWorkbenchRef(workbench, validationRef);
-  const content = fs.readFileSync(file, 'utf8');
-  const hasVisualEvidence = /(截图|actual|expected|视觉|逐块|人工核对|像素|render|screenshot|ui-review)/i.test(content);
+  const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const hasVisualEvidence = /(截图|actual|expected|视觉|逐块|人工核对|像素|render|screenshot|ui-review|schema-only)/i.test(content);
   const blocked = /visual-validation-blocked|视觉验证阻塞|无法截图|无法启动页面|无法核对/i.test(content);
   const acceptedSkip = /用户.*(接受|同意|确认).*(跳过|暂不).*视觉|接受跳过视觉|同意跳过视觉/i.test(content);
   if (!hasVisualEvidence) {
@@ -659,9 +950,13 @@ function writeProjection(workbench, state) {
   writeJson(path.join(workbench, 'mission.state.json'), {
     workflowVersion: state.workflowVersion,
     name: state.name,
+    mode: state.mode || DEFAULT_MODE,
     phase: state.phase,
     gates: state.gates,
+    gateNames: GATE_ALIASES,
     execution: state.execution,
+    policies: state.policies || {},
+    artifacts: state.artifacts || {},
     humanConfirmations: state.humanConfirmations || {},
     checks: state.checks,
     recommendedNext: recommendNext(state),
@@ -669,12 +964,15 @@ function writeProjection(workbench, state) {
   });
 }
 
-function writeGateDecision(workbench, gate, state, options) {
+function writeGateDecision(workbench, gate, state, options, name) {
   writeJson(path.join(workbench, 'gates', `gate-${gate}-decision.json`), {
     gate,
+    name: name || GATE_ALIASES[`gate${gate}`],
     phase: state.phase,
+    mode: state.mode || DEFAULT_MODE,
     gates: state.gates,
     execution: state.execution,
+    policies: state.policies || {},
     options,
     decidedAt: now()
   });
@@ -689,6 +987,10 @@ function loadState(workbench, fallback) {
 function requireState(workbench) {
   const state = loadState(workbench, null);
   if (!state) throw new Error(`No state found. Run init first: ${workbench}`);
+  state.mode = normalizeMode(state.mode || DEFAULT_MODE);
+  state.policies = normalizePolicies({}, state.policies);
+  state.checks = state.checks || deepClone(DEFAULT_STATE.checks);
+  state.artifacts = state.artifacts || {};
   return state;
 }
 
@@ -703,6 +1005,7 @@ function statePath(workbench) {
 
 function appendEvent(workbench, type, payload) {
   const file = path.join(workbench, 'events.jsonl');
+  ensureDir(path.dirname(file));
   fs.appendFileSync(file, `${JSON.stringify({ type, payload, at: now() })}\n`);
 }
 
@@ -728,41 +1031,47 @@ function toCamel(value) {
 }
 
 function readBoolean(value, fallback) {
-  if (value === undefined || value === null) return fallback;
-  if (value === true || value === 'true') return true;
-  if (value === false || value === 'false') return false;
+  if (value === undefined || value === null || value === '') return fallback;
+  if (value === true || value === 'true' || value === '1' || value === 'yes') return true;
+  if (value === false || value === 'false' || value === '0' || value === 'no') return false;
   return fallback;
-}
-
-function csv(value) {
-  if (value === undefined || value === null || value === true) return [];
-  return String(value)
-    .split(',')
-    .map(item => item.trim())
-    .filter(Boolean);
 }
 
 function hasNonEmptyFile(file) {
   return fs.existsSync(file) && fs.statSync(file).isFile() && fs.readFileSync(file, 'utf8').trim().length > 0;
 }
 
-function requiredWorkbenchFiles(workbench) {
+function writeIfMissing(file, content) {
+  if (fs.existsSync(file)) return;
+  ensureDir(path.dirname(file));
+  fs.writeFileSync(file, content);
+}
+
+function requiredWorkbenchFiles(workbench, state) {
+  if (isLite(state)) {
+    return ['brief.md', 'reports/validation.md'];
+  }
   const files = [
+    'context.md',
     'specs/requirement-alignment.md'
   ];
-
-  if (hasApiMaterial(workbench)) files.push('specs/api-spec.md');
-
+  if (hasApiMaterial(workbench)) files.push('specs/api-contract.md');
   if (hasUiManifest(workbench)) {
+    files.push('specs/ui-contract.md');
     files.push('specs/ui-material-index.md');
-    files.push('specs/ui-schema-extract.md');
   }
-
-  if (needsPageContractMatrix(workbench)) {
-    files.push('specs/page-contract-matrix.md');
-  }
-
+  if (hasApiMaterial(workbench) && hasUiManifest(workbench)) files.push('specs/page-contract-matrix.md');
   return files;
+}
+
+function validateLiteBrief(workbench) {
+  const file = path.join(workbench, 'brief.md');
+  const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const confirmed = /(状态|结论|确认|scope).{0,30}(已确认|确认通过|approved|accepted)/i.test(content);
+  const confirmedByUser = /(确认人|confirmedBy|confirmed by|用户|user)/i.test(content);
+  if (!confirmed || !confirmedByUser) {
+    throw new Error('Lite brief is not confirmed. Update brief.md with scope, non-scope, validation, and user confirmation summary.');
+  }
 }
 
 function validateRequirementAlignment(workbench) {
@@ -773,7 +1082,7 @@ function validateRequirementAlignment(workbench) {
   const hasBlockingOpen = /(阻塞|blocking|blocker).{0,40}(待确认|未确认|open|pending|TODO)/i.test(content);
   const explicitPending = /(状态|结论|确认).{0,20}(待确认|未确认|pending|not[- ]?approved)/i.test(content);
   if (!confirmed || !confirmedByUser || hasBlockingOpen || explicitPending) {
-    throw new Error('Requirement alignment is not confirmed. Update specs/requirement-alignment.md with user-confirmed understanding, scope, rules, examples, and confirmation summary.');
+    throw new Error('Requirement alignment is not confirmed. Update specs/requirement-alignment.md with user-confirmed understanding, scope, rules, examples, contracts, and confirmation summary.');
   }
 }
 
@@ -784,11 +1093,11 @@ function validateGate1BrainstormingFanIn(workbench) {
   const questions = fs.readFileSync(questionFile, 'utf8');
   const hasEmptyAnswer = /你的答案：\s*(?:\r?\n)+\s*>\s*(?:\r?\n|$)/.test(questions);
   if (hasEmptyAnswer) {
-    throw new Error('Gate 1 brainstorming questions are not fully answered. Fill specs/gate-1-brainstorming-questions.md or remove it before approving Gate 1.');
+    throw new Error('Gate 1 brainstorming questions are not fully answered. Fill specs/gate-1-brainstorming-questions.md or remove it before approving Scope gate.');
   }
 
   const fanInRefs = ['context.md', 'specs/requirement-alignment.md', 'plans/progress.md'];
-  if (needsPageContractMatrix(workbench)) fanInRefs.push('specs/page-contract-matrix.md');
+  if (hasApiMaterial(workbench) && hasUiManifest(workbench)) fanInRefs.push('specs/page-contract-matrix.md');
 
   const fanInEvidenceRe = /(Brainstorming|问题清单|答案回填|已回填|已同步|澄清问题|fan-?in)/i;
   const missingFanIn = fanInRefs.filter(ref => {
@@ -798,43 +1107,22 @@ function validateGate1BrainstormingFanIn(workbench) {
   });
 
   if (missingFanIn.length) {
-    throw new Error(`Gate 1 brainstorming answers are not fan-in to main workbench docs. Missing evidence in: ${missingFanIn.join(', ')}`);
+    throw new Error(`Scope brainstorming answers are not fan-in to main workbench docs. Missing evidence in: ${missingFanIn.join(', ')}`);
   }
 }
 
-function validatePlanWorkbench(workbench) {
-  const required = [
-    'plans/task-plan.md',
-    'plans/progress.md',
-    'reviews/review-packs.md',
-    'reports/validation.md'
-  ];
-  const missing = required.filter(file => !hasNonEmptyFile(path.join(workbench, file)));
-  if (missing.length) {
-    throw new Error(`Gate 2 plan check failed. Missing or empty: ${missing.join(', ')}`);
-  }
-}
-
-function requiredWorkbenchAlternatives(workbench) {
+function requiredWorkbenchAlternatives(workbench, state) {
+  if (isLite(state)) return [];
   const alternatives = [
-    {
-      label: 'context.md',
-      refs: ['context.md', 'specs/context.md']
-    }
+    { label: 'context.md', refs: ['context.md', 'specs/context.md'] }
   ];
-
-  if (hasUiManifest(workbench)) {
-    alternatives.push({
-      label: 'UI manifest',
-      refs: ['ui/manifest.json', '../source/ui/manifest.json', '../input/ui/manifest.json']
-    });
+  if (hasApiMaterial(workbench)) {
+    alternatives.push({ label: 'API contract', refs: ['specs/api-contract.md', 'specs/api-spec.md'] });
   }
-
+  if (hasUiManifest(workbench)) {
+    alternatives.push({ label: 'UI manifest', refs: ['ui/manifest.json', '../source/ui/manifest.json', '../input/ui/manifest.json'] });
+  }
   return alternatives;
-}
-
-function needsPageContractMatrix(workbench) {
-  return hasApiMaterial(workbench) && hasUiManifest(workbench);
 }
 
 function hasApiMaterial(workbench) {
@@ -843,7 +1131,6 @@ function hasApiMaterial(workbench) {
 
 function scanApiMaterial(rootDir) {
   if (!fs.existsSync(rootDir)) return false;
-
   const scan = (currentDir, depth) => {
     let entries = [];
     try {
@@ -851,21 +1138,17 @@ function scanApiMaterial(rootDir) {
     } catch {
       return false;
     }
-
     for (const entry of entries) {
       const name = entry.name;
       const lowerName = name.toLowerCase();
       if (name.startsWith('.') || GENERATED_WORKBENCH_DIRS.has(lowerName)) continue;
       if (API_MATERIAL_NAME_RE.test(name)) return true;
-
       if (entry.isDirectory() && depth < 2) {
         if (scan(path.join(currentDir, name), depth + 1)) return true;
       }
     }
-
     return false;
   };
-
   return scan(rootDir, 0);
 }
 
@@ -907,22 +1190,132 @@ function now() {
   return new Date().toISOString();
 }
 
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function liteBriefTemplate(state) {
+  return `# Lite Brief\n\n## 状态\n\n状态：待确认\n确认人：-\n\n## 本次要做\n\n- TODO\n\n## 本次不做\n\n- TODO\n\n## 验证方式\n\n- TODO\n\n## 用户确认摘要\n\n- TODO\n`;
+}
+
+function validationTemplate() {
+  return `# 验证报告\n\n## Superpowers / Policy Evidence\n\n结构化证据优先记录到 \`reports/evidence.jsonl\`。迁移期可在此保留人工可读摘要。\n\n## 命令\n\n| 命令 | 结果 | 摘要 |\n| --- | --- | --- |\n| pending | pending | pending |\n\n## UI / Visual Validation\n\n- pending\n\n## 风险与阻塞\n\n- pending\n`;
+}
+
+function contextTemplate(state) {
+  return `# 共享上下文\n\n需求：${state.name || '-'}\n模式：${state.mode || DEFAULT_MODE}\n\n## 导航\n\n- source: ../source\n- specs: specs/\n- plans: plans/\n- reviews: reviews/\n- reports: reports/\n\n## 已确认事实\n\n- pending\n\n## AI 推断\n\n- pending\n\n## 待确认问题\n\n- pending\n`;
+}
+
+function requirementAlignmentTemplate() {
+  return `# Scope & Contract Alignment\n\n## 状态\n\n状态：待确认\n确认人：-\n\n## 本次范围\n\n- pending\n\n## 非范围\n\n- pending\n\n## 需求事实\n\n- pending\n\n## AI 推断\n\n- pending\n\n## Contract 摘要\n\n- UI Contract：按需见 \`specs/ui-contract.md\`\n- API Contract：按需见 \`specs/api-contract.md\`\n- Behavior Contract：按需见 \`specs/behavior-contract.md\`\n\n## 验收场景\n\n- pending\n\n## 用户确认摘要\n\n- pending\n`;
+}
+
+function taskPlanTemplate() {
+  return `# Plan & Review Strategy\n\n## Execution Mode\n\n- mode: pending\n- worktree: false\n- subagents: false\n- checkpoint: false\n\n## Superpowers\n\n- pending: superpowers:writing-plans\n\n## RP DAG\n\n- RP1: pending\n\n## Review Strategy\n\n- 每个 RP 必须指向真实 diff、patch、branch 或 PR。\n\n## Validation Strategy\n\n- pending\n`;
+}
+
+function progressTemplate() {
+  return `# Progress\n\n## 当前阶段\n\n- pending\n\n## 阻塞项\n\n- pending\n\n## 日志\n\n- pending\n`;
+}
+
+function reviewPacksTemplate() {
+  return `# Review Packs\n\n## 规则\n\n每个 RP 必须指向真实 diff、patch、branch 或 PR，不能只列 Markdown 摘要。\n\n## RP1\n\n- Scope: pending\n- Diff command: pending\n- Files: pending\n- Validation: pending\n- Risk: pending\n`;
+}
+
+function apiContractTemplate() {
+  return `# API Contract\n\n## 接口清单\n\n| 接口 | Method | Path | 范围 | 状态 |\n| --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending |\n\n## 字段映射\n\n| 字段 | 来源 | 类型 | 用途 | 风险 |\n| --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending |\n\n## Loading / Empty / Error\n\n- pending\n`;
+}
+
+function apiContractJsonTemplate() {
+  return `${JSON.stringify({ version: 1, apis: [], fields: [], states: { loading: [], empty: [], error: [] } }, null, 2)}\n`;
+}
+
+function uiContractTemplate() {
+  return `# UI Contract\n\n## 画板绑定\n\n| 画板 | 版本 | Schema | 图片基线 | 状态 |\n| --- | --- | --- | --- | --- |\n| pending | pending | pending | optional | pending |\n\n## 强视觉节点\n\n- pending\n\n## 资源映射\n\n- pending\n\n## 可接受偏差\n\n- pending\n\n## 不可接受偏差\n\n- pending\n`;
+}
+
+function uiContractJsonTemplate() {
+  return `${JSON.stringify({ version: 1, boards: [], assets: [], tolerances: { accepted: [], rejected: [] } }, null, 2)}\n`;
+}
+
+function uiMaterialIndexTemplate() {
+  return `# UI 物料索引\n\n请优先运行：\n\n\`\`\`bash\nnode <plugin-root>/skills/mission-control/scripts/inspect-ui.js <workbench> --write-index true\n\`\`\`\n\n## 摘要\n\n- pending\n`;
+}
+
+function uiSchemaExtractTemplate() {
+  return `# UI Schema Extract\n\n## 节点级提取\n\n- pending\n\n## Schema 到实现映射表\n\n| Schema 节点/路径 | 设计值 | 代码文件/组件/样式选择器 | 实现值 | 偏差说明 |\n| --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending |\n\n## 资源映射\n\n- 图片图层 / image-backed nodes: pending\n- OSS / URL: pending\n`;
+}
+
+function uiSchemaMapTemplate() {
+  return `# UI Schema Map\n\n| Schema 节点 | 资源/结构 | 实现位置 | 验证证据 |\n| --- | --- | --- | --- |\n| pending | pending | pending | pending |\n`;
+}
+
+function pageContractMatrixTemplate() {
+  return `# Page Contract Matrix\n\n| 页面/模块 | PRD source_ref | UI 画板/schema | API/mock | 公共契约 | RP |\n| --- | --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending | pending |\n`;
+}
+
+function behaviorContractTemplate() {
+  return `# Behavior Contract\n\n## 状态机\n\n- pending\n\n## 交互规则\n\n- pending\n\n## 跳转 / 权限 / 缓存 / 并发\n\n- pending\n\n## 埋点\n\n- pending\n`;
+}
+
+function reviewContractTemplate() {
+  return `# Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | pending | pending | pending | pending | pending | pending |\n`;
+}
+
+function reviewContractJsonTemplate() {
+  return `${JSON.stringify({ version: 1, reviewPacks: [] }, null, 2)}\n`;
+}
+
+function worktreePlanTemplate() {
+  return `# Worktree Plan\n\n- base: pending\n- location: pending\n- branch naming: pending\n- cleanup: requires Final gate\n`;
+}
+
+function agentIndexTemplate() {
+  return `# Agent Index\n\n编码 worker 不得直接更新主控工作台；只写自己的 handoff 和验证记录。\n\n| Agent | RP | Worktree | Status | Handoff |\n| --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending |\n`;
+}
+
+function codeReviewReadmeTemplate() {
+  return `# Code Review Agent Outputs\n\n只读 review agent 的输出放在这里。输出必须 findings first。\n`;
+}
+
+function contractChangesTemplate() {
+  return `# Contract Changes\n\n只有发生或预计发生公共契约变更时使用。\n`;
+}
+
+function integrationPlanTemplate() {
+  return `# Integration Plan\n\n仅当需要独立集成分支或集成计划时使用。\n`;
+}
+
 function printHelp() {
   console.log(`Usage:
-  node scripts/supermaestro.js init <workbench> --name <name>
+  node scripts/supermaestro.js init <workbench> --name <name> --mode <lite|standard|strict>
+  node scripts/supermaestro.js scaffold <workbench> [--api true] [--ui true] [--worktree true] [--subagents true]
   node scripts/supermaestro.js status <workbench>
   node scripts/supermaestro.js next <workbench>
   node scripts/supermaestro.js resume <workbench>
   node scripts/supermaestro.js check-workbench <workbench>
-  node scripts/supermaestro.js approve-gate1 <workbench> --confirmed-by user --confirmation <text>
-  node scripts/supermaestro.js approve-gate2 <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
+  node scripts/supermaestro.js approve-scope <workbench> --confirmed-by user --confirmation <text>
+  node scripts/supermaestro.js approve-plan <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
+  node scripts/supermaestro.js evidence <workbench> --type skill.used --skill superpowers:writing-plans --phase plan --summary <text>
   node scripts/supermaestro.js check <workbench> --action code --non-ui true --reason <reason>
-  node scripts/supermaestro.js check <workbench> --action code --ui true --boards <names> --schemas <paths> --schema-extract <path> --schema-only true
   node scripts/supermaestro.js check <workbench> --action dispatch-subagent
   node scripts/supermaestro.js verify <workbench> --strict true
-  node scripts/supermaestro.js request-gate3 <workbench>
-  node scripts/supermaestro.js approve-gate3 <workbench> --review true --validation true
-  node scripts/supermaestro.js request-gate4 <workbench>
-  node scripts/supermaestro.js approve-gate4 <workbench> --merge false --commit false --push false --cleanup false
+  node scripts/supermaestro.js request-review <workbench>
+  node scripts/supermaestro.js approve-review <workbench> --review true --validation true
+  node scripts/supermaestro.js request-final <workbench>
+  node scripts/supermaestro.js approve-final <workbench> --merge false --commit false --push false --cleanup false
+
+Compatible aliases:
+  approve-gate1 -> approve-scope
+  approve-gate2 -> approve-plan
+  request-gate3 -> request-review
+  approve-gate3 -> approve-review
+  request-gate4 -> request-final
+  approve-gate4 -> approve-final
 `);
 }

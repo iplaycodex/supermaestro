@@ -60,14 +60,22 @@ function assertReadmeCommandsMatchCli() {
     'status',
     'next',
     'resume',
+    'scaffold',
     'check-workbench',
+    'approve-scope',
     'approve-gate1',
+    'approve-plan',
     'approve-gate2',
+    'evidence',
     'check',
     'verify',
+    'request-review',
     'request-gate3',
+    'approve-review',
     'approve-gate3',
+    'request-final',
     'request-gate4',
+    'approve-final',
     'approve-gate4'
   ]);
   const commands = Array.from(readme.matchAll(commandRe), match => match[1]);
@@ -184,7 +192,7 @@ try {
   approveGate1(workbench);
   assert.equal(readState(workbench).gates.gate1, 'approved');
 
-  mustFail(['check', workbench, '--action', 'code'], /gate2 is not approved/i);
+  mustFail(['check', workbench, '--action', 'code'], /(gate2|plan gate) is not approved/i);
 
   seedGate2Docs(workbench);
   approveGate2(workbench);
