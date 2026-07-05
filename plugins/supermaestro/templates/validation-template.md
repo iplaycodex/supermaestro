@@ -13,6 +13,7 @@ SuperMaestro gates require real invocation evidence here. Planning to use a skil
 
 | Skill | Trigger | Result | Evidence |
 | --- | --- | --- | --- |
+| `superpowers:brainstorming` | Gate 1 ambiguity discovery | pending / used / not-needed |  |
 | `superpowers:writing-plans` | Gate 2 planning | pending / used |  |
 | `superpowers:test-driven-development` | coding behavior changes | pending / used / not-applicable |  |
 | `superpowers:subagent-driven-development` | real worker agents | pending / used / not-needed |  |

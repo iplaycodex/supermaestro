@@ -78,6 +78,44 @@ write(path.join(alignmentWb, 'specs/requirement-alignment.md'), [
 result = run(['check-workbench', alignmentWb], alignmentRoot)
 assert.strictEqual(result.status, 0, result.stdout + result.stderr)
 
+const brainstormingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-harness-brainstorming-'))
+const brainstormingWb = path.join(brainstormingRoot, 'workbench')
+result = run(['init', brainstormingWb, '--name', '澄清问题测试'], brainstormingRoot)
+assert.strictEqual(result.status, 0, result.stderr)
+write(path.join(brainstormingWb, 'context.md'), '# 上下文\n\n已整理。\n')
+write(path.join(brainstormingWb, 'specs/requirement-alignment.md'), '# 需求对齐\n\n状态：已确认\n确认人：user\n确认摘要：用户确认需求理解一致\n')
+write(path.join(brainstormingWb, 'specs/gate-1-brainstorming-questions.md'), [
+  '# Gate 1 Brainstorming Questions',
+  '',
+  '### Q1. 范围边界',
+  '',
+  '你的答案：',
+  '',
+  '>',
+  '',
+].join('\n'))
+result = run(['check-workbench', brainstormingWb], brainstormingRoot)
+assert.notStrictEqual(result.status, 0, 'Gate 1 should require answered brainstorming questions')
+assert.match(result.stderr, /brainstorming questions are not fully answered/)
+write(path.join(brainstormingWb, 'specs/gate-1-brainstorming-questions.md'), [
+  '# Gate 1 Brainstorming Questions',
+  '',
+  '### Q1. 范围边界',
+  '',
+  '你的答案：',
+  '',
+  '> 本期只做主流程。',
+  '',
+].join('\n'))
+result = run(['check-workbench', brainstormingWb], brainstormingRoot)
+assert.notStrictEqual(result.status, 0, 'Gate 1 should require brainstorming fan-in evidence')
+assert.match(result.stderr, /not fan-in/)
+write(path.join(brainstormingWb, 'context.md'), '# 上下文\n\n## Gate 1 Brainstorming Answer Fan-In\n\nQ1 已同步：本期只做主流程。\n')
+write(path.join(brainstormingWb, 'specs/requirement-alignment.md'), '# 需求对齐\n\n状态：已确认\n确认人：user\n确认摘要：用户确认需求理解一致\n\n## Brainstorming 问题清单答案回填\n\nQ1 已同步。\n')
+write(path.join(brainstormingWb, 'plans/progress.md'), '# 进度同步\n\n## Gate 1 Brainstorming\n\n| Question File | Status | Fan-In Targets | Evidence |\n| --- | --- | --- | --- |\n| gate-1-brainstorming-questions.md | synced | context.md / requirement-alignment.md | Q1 已同步 |\n')
+result = run(['check-workbench', brainstormingWb], brainstormingRoot)
+assert.strictEqual(result.status, 0, result.stdout + result.stderr)
+
 result = run([
   'approve-gate1',
   wb,

@@ -14,6 +14,11 @@
 
 ## Log
 
+## Gate 1 Brainstorming
+
+| Question File | Status | Fan-In Targets | Evidence |
+| --- | --- | --- | --- |
+
 ## Blockers
 
 ## Validation Progress

@@ -37,7 +37,7 @@ workbench/reports/validation.md
 
 ## Gate Rules
 
-- Gate 1 must pass before final task planning; it confirms human/AI requirement understanding, scope, rules, examples, assumptions, and acceptance scenarios.
+- Gate 1 must pass before final task planning; it confirms human/AI requirement understanding, scope, rules, examples, assumptions, and acceptance scenarios. If a Gate 1 brainstorming question sheet exists, it is an auditable clarification record and all answers must be fan-in to the main workbench docs before approval.
 - Gate 2 must pass before coding, worktree creation, branch creation, or subagent dispatch; it confirms task plan, execution mode, review packs, and implementation strategy.
 - Gate 3 must pass before requesting final actions; it confirms review packs and validation evidence.
 - Gate 4 must pass before commit, merge, push, cleanup, or rollback.
@@ -66,7 +66,7 @@ workbench/reports/validation.md
 
 Hard gate mapping:
 
-- Gate 1 workbench checks require `specs/requirement-alignment.md` with explicit user-confirmed alignment evidence.
+- Gate 1 workbench checks require `specs/requirement-alignment.md` with explicit user-confirmed alignment evidence and, when present, completed `specs/gate-1-brainstorming-questions.md` answers with fan-in evidence in the main workbench docs.
 - Gate 2 plan approval requires `superpowers:writing-plans` evidence.
 - Code action checks require `superpowers:test-driven-development` plus either `superpowers:subagent-driven-development` or `superpowers:executing-plans` evidence, depending on execution mode.
 - Subagent dispatch checks require `superpowers:subagent-driven-development` evidence.

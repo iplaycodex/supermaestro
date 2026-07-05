@@ -174,6 +174,7 @@ function checkWorkbench(workbench) {
   }
 
   validateRequirementAlignment(workbench);
+  validateGate1BrainstormingFanIn(workbench);
   console.log('Workbench check passed.');
 }
 
@@ -673,6 +674,31 @@ function validateRequirementAlignment(workbench) {
   const explicitPending = /(状态|结论|确认).{0,20}(待确认|未确认|pending|not[- ]?approved)/i.test(content);
   if (!confirmed || !confirmedByUser || hasBlockingOpen || explicitPending) {
     throw new Error('Requirement alignment is not confirmed. Update specs/requirement-alignment.md with user-confirmed understanding, scope, rules, examples, and confirmation summary.');
+  }
+}
+
+function validateGate1BrainstormingFanIn(workbench) {
+  const questionFile = path.join(workbench, 'specs', 'gate-1-brainstorming-questions.md');
+  if (!fs.existsSync(questionFile)) return;
+
+  const questions = fs.readFileSync(questionFile, 'utf8');
+  const hasEmptyAnswer = /你的答案：\s*(?:\r?\n)+\s*>\s*(?:\r?\n|$)/.test(questions);
+  if (hasEmptyAnswer) {
+    throw new Error('Gate 1 brainstorming questions are not fully answered. Fill specs/gate-1-brainstorming-questions.md or remove it before approving Gate 1.');
+  }
+
+  const fanInRefs = ['context.md', 'specs/requirement-alignment.md', 'plans/progress.md'];
+  if (needsPageContractMatrix(workbench)) fanInRefs.push('specs/page-contract-matrix.md');
+
+  const fanInEvidenceRe = /(Brainstorming|问题清单|答案回填|已回填|已同步|澄清问题|fan-?in)/i;
+  const missingFanIn = fanInRefs.filter(ref => {
+    const file = resolveWorkbenchRef(workbench, ref);
+    if (!hasNonEmptyFile(file)) return true;
+    return !fanInEvidenceRe.test(fs.readFileSync(file, 'utf8'));
+  });
+
+  if (missingFanIn.length) {
+    throw new Error(`Gate 1 brainstorming answers are not fan-in to main workbench docs. Missing evidence in: ${missingFanIn.join(', ')}`);
   }
 }
 

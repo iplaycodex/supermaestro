@@ -895,6 +895,7 @@ function validateWorkbench(dir) {
     )
   }
   validateRequirementAlignment(dir)
+  validateGate1BrainstormingFanIn(dir)
 }
 
 function validateRequirementAlignment(dir) {
@@ -910,6 +911,38 @@ function validateRequirementAlignment(dir) {
     deny(
       'check-workbench',
       '需求对齐文档未确认；请在 specs/requirement-alignment.md 记录用户已确认的需求理解、范围、规则、例子、待确认项处理结论和确认摘要。'
+    )
+  }
+}
+
+function validateGate1BrainstormingFanIn(dir) {
+  const ref = path.join('specs', 'gate-1-brainstorming-questions.md')
+  const filePath = resolveRequirementRef(dir, ref)
+  if (!fs.existsSync(filePath)) return
+
+  const questions = readText(filePath)
+  const hasEmptyAnswer = /你的答案：\s*(?:\r?\n)+\s*>\s*(?:\r?\n|$)/.test(questions)
+  if (hasEmptyAnswer) {
+    deny(
+      'check-workbench',
+      'Gate 1 brainstorming questions are not fully answered. Fill specs/gate-1-brainstorming-questions.md or remove it before approving Gate 1.'
+    )
+  }
+
+  const fanInRefs = ['context.md', path.join('specs', 'requirement-alignment.md'), path.join('plans', 'progress.md')]
+  if (needsPageContractMatrix(dir)) fanInRefs.push(path.join('specs', 'page-contract-matrix.md'))
+
+  const fanInEvidenceRe = /(Brainstorming|问题清单|答案回填|已回填|已同步|澄清问题|fan-?in)/i
+  const missingFanIn = fanInRefs.filter(targetRef => {
+    const targetFile = resolveRequirementRef(dir, targetRef)
+    if (!fileExistsAndHasContent(targetFile)) return true
+    return !fanInEvidenceRe.test(readText(targetFile))
+  })
+
+  if (missingFanIn.length) {
+    deny(
+      'check-workbench',
+      `Gate 1 brainstorming answers are not fan-in to main workbench docs. Missing evidence in: ${missingFanIn.join(', ')}`
     )
   }
 }
