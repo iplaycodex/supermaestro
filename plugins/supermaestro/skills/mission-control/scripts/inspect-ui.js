@@ -359,7 +359,7 @@ function renderIndex(report, dir) {
   lines.push('')
   lines.push('## 任务绑定说明')
   lines.push('')
-  lines.push('- Gate 1 前必须在任务卡中标明每个 UI 任务使用哪些画板。')
+  lines.push('- Gate 2 前必须在任务卡中标明每个 UI 任务使用哪些画板。')
   lines.push('- 备份/复制画板默认视为范围问题；除非 PRD 或用户明确选择，不得直接绑定实现。')
   const schemaDir = path.join(maybeRelative(dir, summary.uiDir), 'schemas')
   lines.push(`- UI 编码必须 Sketch Data first：先读取对应 \`${schemaDir}/*.json\` 原文，并逐节点提取层级、坐标、尺寸、颜色、字体、圆角、阴影、图层和资源，再写实现。`)

@@ -4,11 +4,11 @@ const fs = require('fs')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 const MISSION_STATE_VERSION = 1
 const VALID_MODES = new Set(['main-serial', 'single-worktree-serial', 'multi-worktree-parallel'])
 const BASE_ACTIONS = new Set(['read-docs', 'edit-plan-docs', 'update-plan-docs', 'validate'])
-const GATE1_ACTIONS = new Set([
+const GATE2_ACTIONS = new Set([
   'code',
   'create-worktree',
   'create-branch',
@@ -17,7 +17,7 @@ const GATE1_ACTIONS = new Set([
   'checkpoint-commit'
 ])
 const GATE3_ACTIONS = new Set(['merge', 'commit', 'push', 'cleanup-worktree'])
-const KNOWN_ACTIONS = new Set([...BASE_ACTIONS, ...GATE1_ACTIONS, ...GATE3_ACTIONS])
+const KNOWN_ACTIONS = new Set([...BASE_ACTIONS, ...GATE2_ACTIONS, ...GATE3_ACTIONS])
 const WORKTREE_ACTIONS = new Set(['create-worktree', 'create-branch', 'sync-materials'])
 const GENERATED_WORKBENCH_DIRS = new Set(['gates', 'plans', 'reports', 'reviews', 'specs', 'ui', 'workbench'])
 const API_MATERIAL_NAME_RE = /(api|swagger|openapi|postman|mock|interface|interfaces|接口|后端|联调|knife4j)/i
@@ -47,11 +47,12 @@ Usage:
   node scripts/harness.js resume <requirement-dir> [--json]
   node scripts/harness.js check-workbench <requirement-dir>
   node scripts/harness.js verify <requirement-dir> [--strict true|false]
-  node scripts/harness.js approve-gate1 <requirement-dir> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation <text> [--worktree true|false] [--subagents true|false] [--checkpoint true|false] [--notes <text>]
-  node scripts/harness.js request-gate2 <requirement-dir> [--review-pack <path>] [--validation <path>] [--notes <text>] [--force true|false]
-  node scripts/harness.js approve-gate2 <requirement-dir> [--review true|false] [--validation true|false] [--notes <text>]
-  node scripts/harness.js request-gate3 <requirement-dir> [--notes <text>] [--force true|false]
-  node scripts/harness.js approve-gate3 <requirement-dir> [--merge true|false] [--commit true|false] [--push true|false] [--cleanup true|false] [--notes <text>]
+  node scripts/harness.js approve-gate1 <requirement-dir> --confirmed-by user --confirmation <text> [--notes <text>]
+  node scripts/harness.js approve-gate2 <requirement-dir> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation <text> [--worktree true|false] [--subagents true|false] [--checkpoint true|false] [--notes <text>]
+  node scripts/harness.js request-gate3 <requirement-dir> [--review-pack <path>] [--validation <path>] [--notes <text>] [--force true|false]
+  node scripts/harness.js approve-gate3 <requirement-dir> [--review true|false] [--validation true|false] [--notes <text>]
+  node scripts/harness.js request-gate4 <requirement-dir> [--notes <text>] [--force true|false]
+  node scripts/harness.js approve-gate4 <requirement-dir> [--merge true|false] [--commit true|false] [--push true|false] [--cleanup true|false] [--notes <text>]
   node scripts/harness.js check <requirement-dir> --action <action> [--ui true] [--schema-only true] [--non-ui true --reason <text>] [--boards <names>] [--schemas <paths>] [--schema-extract <path>] [--baselines <paths>]
 `
   console.error(text.trim())
@@ -119,7 +120,8 @@ function paths(dir) {
     missionState: path.join(dir, 'mission.state.json'),
     gate1: path.join(dir, 'gates', 'gate-1-decision.json'),
     gate2: path.join(dir, 'gates', 'gate-2-decision.json'),
-    gate3: path.join(dir, 'gates', 'gate-3-decision.json')
+    gate3: path.join(dir, 'gates', 'gate-3-decision.json'),
+    gate4: path.join(dir, 'gates', 'gate-4-decision.json')
   }
 }
 
@@ -153,12 +155,10 @@ function defaultGateDecision(gate) {
     return {
       schemaVersion: SCHEMA_VERSION,
       gate: 'gate-1',
-      title: '任务拆分与执行模式确认',
+      title: '需求理解与验收对齐确认',
       status: 'pending',
-      executionMode: null,
-      allowWorktree: null,
-      allowSubagents: null,
-      allowCheckpointCommit: null,
+      alignmentReport: 'specs/requirement-alignment.md',
+      alignmentAccepted: false,
       approvedAt: null,
       approvedBy: null,
       humanConfirmed: false,
@@ -172,6 +172,25 @@ function defaultGateDecision(gate) {
     return {
       schemaVersion: SCHEMA_VERSION,
       gate: 'gate-2',
+      title: '任务拆分与执行模式确认',
+      status: 'not-requested',
+      executionMode: null,
+      allowWorktree: null,
+      allowSubagents: null,
+      allowCheckpointCommit: null,
+      approvedAt: null,
+      approvedBy: null,
+      humanConfirmed: false,
+      confirmedBy: null,
+      confirmationText: '',
+      notes: ''
+    }
+  }
+
+  if (gate === 'gate-3') {
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      gate: 'gate-3',
       title: 'Review Pack 与验证结果确认',
       status: 'not-requested',
       reviewPack: 'reviews/review-packs.md',
@@ -187,7 +206,7 @@ function defaultGateDecision(gate) {
 
   return {
     schemaVersion: SCHEMA_VERSION,
-    gate: 'gate-3',
+    gate: 'gate-4',
     title: '集成、提交、推送与清理确认',
     status: 'not-requested',
     allowMerge: false,
@@ -216,14 +235,34 @@ function migrateState(state) {
   }
 }
 
-function isLegacyFinalGate2(gate2) {
+function isLegacyPlanGate1(gate1) {
+  return Boolean(
+    gate1 &&
+      gate1.gate === 'gate-1' &&
+      (Object.prototype.hasOwnProperty.call(gate1, 'executionMode') ||
+        Object.prototype.hasOwnProperty.call(gate1, 'allowWorktree') ||
+        /任务拆分|执行模式/.test(gate1.title || ''))
+  )
+}
+
+function isLegacyReviewGate2(gate2) {
   return Boolean(
     gate2 &&
       gate2.gate === 'gate-2' &&
-      (Object.prototype.hasOwnProperty.call(gate2, 'allowMerge') ||
-        Object.prototype.hasOwnProperty.call(gate2, 'allowCommit') ||
-        Object.prototype.hasOwnProperty.call(gate2, 'allowPush') ||
-        Object.prototype.hasOwnProperty.call(gate2, 'allowCleanup'))
+      (Object.prototype.hasOwnProperty.call(gate2, 'reviewPack') ||
+        Object.prototype.hasOwnProperty.call(gate2, 'validationReport') ||
+        /Review Pack|验证结果/.test(gate2.title || ''))
+  )
+}
+
+function isLegacyFinalGate3(gate3) {
+  return Boolean(
+    gate3 &&
+      gate3.gate === 'gate-3' &&
+      (Object.prototype.hasOwnProperty.call(gate3, 'allowMerge') ||
+        Object.prototype.hasOwnProperty.call(gate3, 'allowCommit') ||
+        Object.prototype.hasOwnProperty.call(gate3, 'allowPush') ||
+        Object.prototype.hasOwnProperty.call(gate3, 'allowCleanup'))
   )
 }
 
@@ -231,63 +270,71 @@ function migrateGate2Decision(gate2) {
   const base = defaultGateDecision('gate-2')
   if (!gate2) return base
 
-  if (isLegacyFinalGate2(gate2)) {
-    return {
-      ...base,
-      status: gate2.status === 'approved' ? 'approved' : 'not-requested',
-      reviewAccepted: gate2.status === 'approved',
-      validationAccepted: gate2.status === 'approved',
-      requestedAt: gate2.requestedAt || null,
-      approvedAt: gate2.approvedAt || null,
-      approvedBy: gate2.approvedBy || null,
-      notes: gate2.status === 'approved' ? `legacy gate-2 migrated; ${gate2.notes || ''}`.trim() : gate2.notes || ''
-    }
-  }
-
   return {
     ...base,
     ...gate2,
     schemaVersion: SCHEMA_VERSION,
     gate: 'gate-2',
     title: base.title,
-    reviewPack: gate2.reviewPack || base.reviewPack,
-    validationReport: gate2.validationReport || base.validationReport,
-    reviewAccepted: gate2.reviewAccepted === true,
-    validationAccepted: gate2.validationAccepted === true
+    executionMode: gate2.executionMode || base.executionMode,
+    allowWorktree: gate2.allowWorktree ?? base.allowWorktree,
+    allowSubagents: gate2.allowSubagents ?? base.allowSubagents,
+    allowCheckpointCommit: gate2.allowCheckpointCommit ?? base.allowCheckpointCommit,
+    humanConfirmed: gate2.humanConfirmed === true,
+    confirmationText: gate2.confirmationText || ''
   }
 }
 
-function migrateGate3Decision(gate3, legacyGate2) {
+function migrateGate3Decision(gate3) {
   const base = defaultGateDecision('gate-3')
   if (gate3) {
+    if (isLegacyFinalGate3(gate3)) return base
     return {
       ...base,
       ...gate3,
       schemaVersion: SCHEMA_VERSION,
       gate: 'gate-3',
       title: base.title,
-      allowMerge: gate3.allowMerge === true,
-      allowCommit: gate3.allowCommit === true,
-      allowPush: gate3.allowPush === true,
-      allowCleanup: gate3.allowCleanup === true
+      reviewPack: gate3.reviewPack || base.reviewPack,
+      validationReport: gate3.validationReport || base.validationReport,
+      reviewAccepted: gate3.reviewAccepted === true,
+      validationAccepted: gate3.validationAccepted === true
     }
   }
 
-  if (isLegacyFinalGate2(legacyGate2)) {
+  return base
+}
+
+function migrateGate4Decision(gate4, legacyGate3) {
+  const base = defaultGateDecision('gate-4')
+  if (gate4) {
     return {
       ...base,
-      status: legacyGate2.status || base.status,
-      allowMerge: legacyGate2.allowMerge === true,
-      allowCommit: legacyGate2.allowCommit === true,
-      allowPush: legacyGate2.allowPush === true,
-      allowCleanup: legacyGate2.allowCleanup === true,
-      requestedAt: legacyGate2.requestedAt || null,
-      approvedAt: legacyGate2.approvedAt || null,
-      approvedBy: legacyGate2.approvedBy || null,
-      notes: legacyGate2.notes || ''
+      ...gate4,
+      schemaVersion: SCHEMA_VERSION,
+      gate: 'gate-4',
+      title: base.title,
+      allowMerge: gate4.allowMerge === true,
+      allowCommit: gate4.allowCommit === true,
+      allowPush: gate4.allowPush === true,
+      allowCleanup: gate4.allowCleanup === true
     }
   }
 
+  if (isLegacyFinalGate3(legacyGate3)) {
+    return {
+      ...base,
+      status: legacyGate3.status || base.status,
+      allowMerge: legacyGate3.allowMerge === true,
+      allowCommit: legacyGate3.allowCommit === true,
+      allowPush: legacyGate3.allowPush === true,
+      allowCleanup: legacyGate3.allowCleanup === true,
+      requestedAt: legacyGate3.requestedAt || null,
+      approvedAt: legacyGate3.approvedAt || null,
+      approvedBy: legacyGate3.approvedBy || null,
+      notes: legacyGate3.notes || ''
+    }
+  }
   return base
 }
 
@@ -298,6 +345,7 @@ function requireState(dir) {
   const gate1 = readJson(p.gate1)
   const rawGate2 = readJson(p.gate2)
   const rawGate3 = readJson(p.gate3)
+  const rawGate4 = readJson(p.gate4)
   if (!state || !gate1 || !rawGate2 || !rawGate3) {
     console.error('Harness state is missing. Run init first.')
     process.exit(2)
@@ -308,7 +356,8 @@ function requireState(dir) {
     state: migrateState(state),
     gate1,
     gate2: migrateGate2Decision(rawGate2),
-    gate3: migrateGate3Decision(rawGate3, rawGate2)
+    gate3: migrateGate3Decision(rawGate3),
+    gate4: migrateGate4Decision(rawGate4, rawGate3)
   }
 }
 
@@ -381,7 +430,7 @@ function validationEvidence(dir) {
       problems.push('检测到 UI 物料，但 reports/validation.md 缺少视觉还原证据。')
     }
     if (blocked && !acceptedSkip) {
-      problems.push('UI 视觉验证仍处于 blocked，且没有记录用户接受跳过视觉验收，不能进入 Gate 2。')
+      problems.push('UI 视觉验证仍处于 blocked，且没有记录用户接受跳过视觉验收，不能进入 Gate 3。')
     }
   }
 
@@ -461,15 +510,15 @@ function runReviewability(dir, strict) {
 
 function verifySummary(dir, flags = {}) {
   const strict = parseBoolean(flags.strict, true)
-  const { gate1 } = requireState(dir)
+  const { gate2 } = requireState(dir)
   const problems = []
   const warnings = []
 
   const workbench = safeValidateWorkbench(dir)
   if (!workbench.ok) problems.push(...workbench.problems)
 
-  if (gate1.status !== 'approved') {
-    problems.push('Gate 1 尚未 approved；不能进入 Gate 2 前关门检查。')
+  if (gate2.status !== 'approved') {
+    problems.push('Gate 2 尚未 approved；不能进入 Gate 3 前关门检查。')
   }
 
   if (!reviewPackCount(dir)) {
@@ -482,12 +531,12 @@ function verifySummary(dir, flags = {}) {
     SUPERPOWER_SKILLS.verificationBeforeCompletion
   ]
   requiredSuperpowers.push(
-    gate1.allowSubagents === true
+    gate2.allowSubagents === true
       ? SUPERPOWER_SKILLS.subagentDrivenDevelopment
       : SUPERPOWER_SKILLS.executingPlans
   )
   if (hasFailureOrReviewFinding(dir)) requiredSuperpowers.push(SUPERPOWER_SKILLS.systematicDebugging)
-  if (gate1.allowSubagents === true || hasReviewAgentWork(dir)) {
+  if (gate2.allowSubagents === true || hasReviewAgentWork(dir)) {
     requiredSuperpowers.push(SUPERPOWER_SKILLS.requestingCodeReview)
   }
   if (/changes-requested|changes requested/i.test(superpowerContent)) {
@@ -514,7 +563,7 @@ function verifySummary(dir, flags = {}) {
   }
 }
 
-function recommendNext(dir, state, gate1, gate2, gate3) {
+function recommendNext(dir, state, gate1, gate2, gate3, gate4) {
   const workbench = safeValidateWorkbench(dir)
   if (!workbench.ok) {
     return {
@@ -527,44 +576,44 @@ function recommendNext(dir, state, gate1, gate2, gate3) {
 
   if (gate1.status !== 'approved') {
     return {
-      summary: '输出 Gate 1 Decision Brief，让用户确认计划和执行模式。',
-      command: 'node <skill-dir>/scripts/harness.js approve-gate1 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation "<用户确认原话或摘要>"',
+      summary: '输出 Gate 1 Requirement Alignment Brief，让用户确认需求理解、范围、规则和验收场景。',
+      command: 'node <skill-dir>/scripts/harness.js approve-gate1 <需求工作台> --confirmed-by user --confirmation "<用户确认原话或摘要>"',
       requiresHuman: true,
       blockedBy: []
     }
   }
 
   if (gate2.status === 'not-requested') {
-    const verify = verifySummary(dir, { strict: true })
-    if (!verify.ok) {
+    const planProblems = requiredPlanFiles().filter(ref => !fileExistsAndHasContent(resolveRequirementRef(dir, ref)))
+    if (planProblems.length) {
       return {
-        summary: '继续执行/修复任务，并补齐 Gate 2 前 review 与验证材料。',
-        command: 'node <skill-dir>/scripts/harness.js verify <需求工作台> --strict true',
+        summary: '补齐 Gate 2 任务计划、进度、review pack 和验证记录。',
+        command: 'node <skill-dir>/scripts/harness.js approve-gate2 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation "<用户确认原话或摘要>"',
         requiresHuman: false,
-        blockedBy: verify.problems
+        blockedBy: planProblems
       }
     }
     return {
-      summary: 'Gate 2 前关门检查已满足，可以请求用户 review。',
-      command: 'node <skill-dir>/scripts/harness.js request-gate2 <需求工作台> --review-pack reviews/review-packs.md --validation reports/validation.md',
-      requiresHuman: false,
-      blockedBy: []
-    }
-  }
-
-  if (gate2.status === 'pending') {
-    return {
-      summary: '等待用户确认 Gate 2 Review Pack 与验证结果。',
-      command: 'node <skill-dir>/scripts/harness.js approve-gate2 <需求工作台> --review true --validation true',
+      summary: '输出 Gate 2 Decision Brief，让用户确认任务拆分和执行模式。',
+      command: 'node <skill-dir>/scripts/harness.js approve-gate2 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation "<用户确认原话或摘要>"',
       requiresHuman: true,
       blockedBy: []
     }
   }
 
   if (gate3.status === 'not-requested') {
+    const verify = verifySummary(dir, { strict: true })
+    if (!verify.ok) {
+      return {
+        summary: '继续执行/修复任务，并补齐 Gate 3 前 review 与验证材料。',
+        command: 'node <skill-dir>/scripts/harness.js verify <需求工作台> --strict true',
+        requiresHuman: false,
+        blockedBy: verify.problems
+      }
+    }
     return {
-      summary: 'Gate 2 已确认，可以请求 Gate 3 最终动作授权。',
-      command: 'node <skill-dir>/scripts/harness.js request-gate3 <需求工作台>',
+      summary: 'Gate 3 前关门检查已满足，可以请求用户 review。',
+      command: 'node <skill-dir>/scripts/harness.js request-gate3 <需求工作台> --review-pack reviews/review-packs.md --validation reports/validation.md',
       requiresHuman: false,
       blockedBy: []
     }
@@ -572,15 +621,33 @@ function recommendNext(dir, state, gate1, gate2, gate3) {
 
   if (gate3.status === 'pending') {
     return {
-      summary: '等待用户确认 Gate 3 最终动作组合。',
-      command: 'node <skill-dir>/scripts/harness.js approve-gate3 <需求工作台> --merge false --commit false --push false --cleanup false',
+      summary: '等待用户确认 Gate 3 Review Pack 与验证结果。',
+      command: 'node <skill-dir>/scripts/harness.js approve-gate3 <需求工作台> --review true --validation true',
+      requiresHuman: true,
+      blockedBy: []
+    }
+  }
+
+  if (gate4.status === 'not-requested') {
+    return {
+      summary: 'Gate 3 已确认，可以请求 Gate 4 最终动作授权。',
+      command: 'node <skill-dir>/scripts/harness.js request-gate4 <需求工作台>',
+      requiresHuman: false,
+      blockedBy: []
+    }
+  }
+
+  if (gate4.status === 'pending') {
+    return {
+      summary: '等待用户确认 Gate 4 最终动作组合。',
+      command: 'node <skill-dir>/scripts/harness.js approve-gate4 <需求工作台> --merge false --commit false --push false --cleanup false',
       requiresHuman: true,
       blockedBy: []
     }
   }
 
   return {
-    summary: 'Gate 3 已确认；执行前仍需按具体动作运行 harness check。',
+    summary: 'Gate 4 已确认；执行前仍需按具体动作运行 harness check。',
     command: 'node <skill-dir>/scripts/harness.js check <需求工作台> --action <merge|commit|push|cleanup-worktree>',
     requiresHuman: false,
     blockedBy: []
@@ -588,8 +655,8 @@ function recommendNext(dir, state, gate1, gate2, gate3) {
 }
 
 function buildMissionState(dir, extra = {}) {
-  const { harness, state, gate1, gate2, gate3 } = requireState(dir)
-  const nextAction = extra.nextAction || recommendNext(dir, state, gate1, gate2, gate3)
+  const { harness, state, gate1, gate2, gate3, gate4 } = requireState(dir)
+  const nextAction = extra.nextAction || recommendNext(dir, state, gate1, gate2, gate3, gate4)
   return {
     schemaVersion: MISSION_STATE_VERSION,
     kind: 'mission-flow-state',
@@ -603,15 +670,16 @@ function buildMissionState(dir, extra = {}) {
     gates: {
       gate1: missionStatusLabel(gate1.status),
       gate2: missionStatusLabel(gate2.status),
-      gate3: missionStatusLabel(gate3.status)
+      gate3: missionStatusLabel(gate3.status),
+      gate4: missionStatusLabel(gate4.status)
     },
-    reviewStatus: gate2.status === 'approved' ? 'accepted' : gate2.status,
-    validationStatus: gate2.validationAccepted ? 'accepted' : gate2.status,
+    reviewStatus: gate3.status === 'approved' ? 'accepted' : gate3.status,
+    validationStatus: gate3.validationAccepted ? 'accepted' : gate3.status,
     finalActions: {
-      merge: gate3.allowMerge === true,
-      commit: gate3.allowCommit === true,
-      push: gate3.allowPush === true,
-      cleanup: gate3.allowCleanup === true
+      merge: gate4.allowMerge === true,
+      commit: gate4.allowCommit === true,
+      push: gate4.allowPush === true,
+      cleanup: gate4.allowCleanup === true
     },
     nextAction,
     sourceOfTruth: missionStateSourceRefs(),
@@ -634,6 +702,7 @@ function printNextSnapshot(snapshot, title = 'Mission Control Next') {
   console.log(`Gate 1: ${snapshot.gates.gate1}`)
   console.log(`Gate 2: ${snapshot.gates.gate2}`)
   console.log(`Gate 3: ${snapshot.gates.gate3}`)
+  console.log(`Gate 4: ${snapshot.gates.gate4}`)
   console.log(`下一步: ${snapshot.nextAction.summary}`)
   console.log(`建议命令: ${snapshot.nextAction.command}`)
   console.log(`需要人工确认: ${snapshot.nextAction.requiresHuman}`)
@@ -759,10 +828,8 @@ function requiredWorkbenchFiles(dir) {
     path.join('gates', 'gate-1-decision.json'),
     path.join('gates', 'gate-2-decision.json'),
     path.join('gates', 'gate-3-decision.json'),
-    path.join('plans', 'task-plan.md'),
-    path.join('plans', 'progress.md'),
-    path.join('reviews', 'review-packs.md'),
-    path.join('reports', 'validation.md')
+    path.join('gates', 'gate-4-decision.json'),
+    path.join('specs', 'requirement-alignment.md')
   ]
 
   if (hasApiMaterial(dir)) {
@@ -779,6 +846,15 @@ function requiredWorkbenchFiles(dir) {
   }
 
   return files
+}
+
+function requiredPlanFiles() {
+  return [
+    path.join('plans', 'task-plan.md'),
+    path.join('plans', 'progress.md'),
+    path.join('reviews', 'review-packs.md'),
+    path.join('reports', 'validation.md')
+  ]
 }
 
 function requiredWorkbenchAlternatives(dir) {
@@ -817,6 +893,33 @@ function validateWorkbench(dir) {
       'check-workbench',
       `工作台标准文档缺失或为空：${missingText}。Gate 1 前必须先补齐占位文档，不能只创建目录。`
     )
+  }
+  validateRequirementAlignment(dir)
+}
+
+function validateRequirementAlignment(dir) {
+  const ref = path.join('specs', 'requirement-alignment.md')
+  const filePath = resolveRequirementRef(dir, ref)
+  const content = readText(filePath)
+  const confirmed = /(状态|结论|确认).{0,20}(已确认|确认通过|approved|accepted)/i.test(content)
+  const confirmedByUser = /(确认人|confirmedBy|confirmed by|用户|user)/i.test(content)
+  const hasBlockingOpen = /(阻塞|blocking|blocker).{0,40}(待确认|未确认|open|pending|TODO)/i.test(content)
+  const explicitPending = /(状态|结论|确认).{0,20}(待确认|未确认|pending|not[- ]?approved)/i.test(content)
+
+  if (!confirmed || !confirmedByUser || hasBlockingOpen || explicitPending) {
+    deny(
+      'check-workbench',
+      '需求对齐文档未确认；请在 specs/requirement-alignment.md 记录用户已确认的需求理解、范围、规则、例子、待确认项处理结论和确认摘要。'
+    )
+  }
+}
+
+function validatePlanWorkbench(dir, action = 'approve-gate2') {
+  const missing = requiredPlanFiles().filter(ref => {
+    return !fileExistsAndHasContent(resolveRequirementRef(dir, ref))
+  })
+  if (missing.length) {
+    deny(action, `计划阶段标准文档缺失或为空：${missing.join(', ')}。Gate 2 前必须补齐任务计划、进度、review pack 和验证记录。`)
   }
 }
 
@@ -892,53 +995,53 @@ function validateSchemaExtractContent(dir, boards, schemas, schemaExtract) {
   return problems
 }
 
-function hasGate1HumanConfirmation(gate1) {
+function hasGateHumanConfirmation(gate) {
   return (
-    gate1.humanConfirmed === true &&
-    String(gate1.confirmedBy || gate1.approvedBy || '').trim().length > 0 &&
-    String(gate1.confirmationText || '').trim().length >= 6
+    gate.humanConfirmed === true &&
+    String(gate.confirmedBy || gate.approvedBy || '').trim().length > 0 &&
+    String(gate.confirmationText || '').trim().length >= 6
   )
 }
 
-function validateGate1(action, gate1) {
-  if (!GATE1_ACTIONS.has(action)) return
+function validateGate2(action, gate2) {
+  if (!GATE2_ACTIONS.has(action)) return
 
-  if (gate1.status !== 'approved') {
-    deny(action, 'Gate 1 尚未确认；不能开始编码、创建隔离环境或派发实现任务。')
+  if (gate2.status !== 'approved') {
+    deny(action, 'Gate 2 尚未确认；不能开始编码、创建隔离环境或派发实现任务。')
   }
 
-  if (!hasGate1HumanConfirmation(gate1)) {
+  if (!hasGateHumanConfirmation(gate2)) {
     deny(
       action,
-      'Gate 1 缺少明确用户确认凭证；请先输出 Gate 1 Decision Brief，并由用户确认后用 approve-gate1 --confirmed-by user --confirmation "<用户确认原话或摘要>" 记录。'
+      'Gate 2 缺少明确用户确认凭证；请先输出 Gate 2 Decision Brief，并由用户确认后用 approve-gate2 --confirmed-by user --confirmation "<用户确认原话或摘要>" 记录。'
     )
   }
 
-  if (WORKTREE_ACTIONS.has(action) && gate1.allowWorktree !== true) {
-    deny(action, 'Gate 1 未授权 worktree、分支或物料同步。')
+  if (WORKTREE_ACTIONS.has(action) && gate2.allowWorktree !== true) {
+    deny(action, 'Gate 2 未授权 worktree、分支或物料同步。')
   }
-  if (action === 'dispatch-subagent' && gate1.allowSubagents !== true) {
-    deny(action, 'Gate 1 未授权派发子 agent。')
+  if (action === 'dispatch-subagent' && gate2.allowSubagents !== true) {
+    deny(action, 'Gate 2 未授权派发子 agent。')
   }
-  if (action === 'checkpoint-commit' && gate1.allowCheckpointCommit !== true) {
-    deny(action, 'Gate 1 未授权 checkpoint commit。')
+  if (action === 'checkpoint-commit' && gate2.allowCheckpointCommit !== true) {
+    deny(action, 'Gate 2 未授权 checkpoint commit。')
   }
 }
 
-function validateGate3(action, gate3) {
+function validateGate4(action, gate4) {
   if (!GATE3_ACTIONS.has(action)) return
-  if (gate3.status !== 'approved') {
-    deny(action, 'Gate 3 尚未确认；不能 merge、commit、push 或清理 worktree。')
+  if (gate4.status !== 'approved') {
+    deny(action, 'Gate 4 尚未确认；不能 merge、commit、push 或清理 worktree。')
   }
 
   const allowedByAction = {
-    merge: gate3.allowMerge,
-    commit: gate3.allowCommit,
-    push: gate3.allowPush,
-    'cleanup-worktree': gate3.allowCleanup
+    merge: gate4.allowMerge,
+    commit: gate4.allowCommit,
+    push: gate4.allowPush,
+    'cleanup-worktree': gate4.allowCleanup
   }
   if (!allowedByAction[action]) {
-    deny(action, `Gate 3 未授权 ${action}。`)
+    deny(action, `Gate 4 未授权 ${action}。`)
   }
 }
 
@@ -1051,7 +1154,9 @@ function init(dir, flags) {
     writeJson(p.gate2, defaultGateDecision('gate-2'))
   }
   const rawGate3 = readJson(p.gate3)
-  writeJson(p.gate3, migrateGate3Decision(rawGate3, rawGate2))
+  writeJson(p.gate3, migrateGate3Decision(rawGate3))
+  const rawGate4 = readJson(p.gate4)
+  writeJson(p.gate4, migrateGate4Decision(rawGate4, rawGate3))
 
   console.log(`Initialized requirement harness at ${dir}`)
   console.log(`Phase: ${readJson(p.state).phase}`)
@@ -1059,7 +1164,7 @@ function init(dir, flags) {
 }
 
 function status(dir, flags) {
-  const { harness, state, gate1, gate2, gate3 } = requireState(dir)
+  const { harness, state, gate1, gate2, gate3, gate4 } = requireState(dir)
   const missionState = syncMissionState(dir)
   const payload = {
     requirementName: harness.requirementName || path.basename(dir),
@@ -1067,21 +1172,22 @@ function status(dir, flags) {
     gate1Status: gate1.status,
     gate2Status: gate2.status,
     gate3Status: gate3.status,
+    gate4Status: gate4.status,
     executionMode: state.executionMode,
     allowWorktree: state.allowWorktree,
     allowSubagents: state.allowSubagents,
     allowCheckpointCommit: state.allowCheckpointCommit,
-    gate2: {
-      reviewPack: gate2.reviewPack,
-      validationReport: gate2.validationReport,
-      reviewAccepted: gate2.reviewAccepted,
-      validationAccepted: gate2.validationAccepted
-    },
     gate3: {
-      allowMerge: gate3.allowMerge,
-      allowCommit: gate3.allowCommit,
-      allowPush: gate3.allowPush,
-      allowCleanup: gate3.allowCleanup
+      reviewPack: gate3.reviewPack,
+      validationReport: gate3.validationReport,
+      reviewAccepted: gate3.reviewAccepted,
+      validationAccepted: gate3.validationAccepted
+    },
+    gate4: {
+      allowMerge: gate4.allowMerge,
+      allowCommit: gate4.allowCommit,
+      allowPush: gate4.allowPush,
+      allowCleanup: gate4.allowCleanup
     },
     uiInspection: state.uiInspection || null,
     nextAction: missionState.nextAction
@@ -1095,8 +1201,9 @@ function status(dir, flags) {
   console.log(`需求: ${payload.requirementName}`)
   console.log(`阶段: ${payload.phase}`)
   console.log(`Gate 1: ${payload.gate1Status}`)
-  console.log(`Gate 2 Review: ${payload.gate2Status}`)
-  console.log(`Gate 3 Final: ${payload.gate3Status}`)
+  console.log(`Gate 2 Plan: ${payload.gate2Status}`)
+  console.log(`Gate 3 Review: ${payload.gate3Status}`)
+  console.log(`Gate 4 Final: ${payload.gate4Status}`)
   console.log(`执行模式: ${payload.executionMode || '-'}`)
   console.log(`允许 worktree: ${payload.allowWorktree}`)
   console.log(`允许子 agent: ${payload.allowSubagents}`)
@@ -1126,15 +1233,10 @@ function resume(dir, flags) {
 function checkWorkbench(dir) {
   requireState(dir)
   validateWorkbench(dir)
-  validateSuperpowerEvidence(dir, [SUPERPOWER_SKILLS.writingPlans], 'check-workbench')
   console.log('ALLOW check-workbench')
 }
 
 function approveGate1(dir, flags) {
-  const mode = flags.mode
-  if (!VALID_MODES.has(mode)) {
-    throw new Error(`Invalid --mode. Expected one of: ${Array.from(VALID_MODES).join(', ')}`)
-  }
   const confirmedBy = String(flags['confirmed-by'] || flags.by || '').trim()
   const confirmationText = String(flags.confirmation || '').trim()
   if (confirmedBy !== 'user') {
@@ -1144,18 +1246,55 @@ function approveGate1(dir, flags) {
     throw new Error('Gate 1 approval requires --confirmation "<用户确认原话或摘要>".')
   }
 
+  const { p, state, gate1 } = requireState(dir)
+  validateWorkbench(dir)
+  writeJson(p.gate1, {
+    ...gate1,
+    schemaVersion: SCHEMA_VERSION,
+    status: 'approved',
+    alignmentAccepted: true,
+    approvedAt: now(),
+    approvedBy: confirmedBy,
+    humanConfirmed: true,
+    confirmedBy,
+    confirmationText,
+    notes: flags.notes || ''
+  })
+  saveState(p, { ...state, phase: 'gate-1-approved' })
+  console.log('Gate 1 requirement-alignment approved.')
+  syncMissionState(dir)
+}
+
+function approveGate2(dir, flags) {
+  const mode = flags.mode
+  if (!VALID_MODES.has(mode)) {
+    throw new Error(`Invalid --mode. Expected one of: ${Array.from(VALID_MODES).join(', ')}`)
+  }
+  const confirmedBy = String(flags['confirmed-by'] || flags.by || '').trim()
+  const confirmationText = String(flags.confirmation || '').trim()
+  if (confirmedBy !== 'user') {
+    throw new Error('Gate 2 approval requires --confirmed-by user after explicit user confirmation.')
+  }
+  if (confirmationText.length < 6) {
+    throw new Error('Gate 2 approval requires --confirmation "<用户确认原话或摘要>".')
+  }
+
   const defaultWorktree = mode !== 'main-serial'
   const defaultSubagents = mode === 'multi-worktree-parallel'
   const allowWorktree = parseBoolean(flags.worktree, defaultWorktree)
   const allowSubagents = parseBoolean(flags.subagents, defaultSubagents)
   const allowCheckpointCommit = parseBoolean(flags.checkpoint, false)
-  const { p, state, gate1 } = requireState(dir)
+  const { p, state, gate1, gate2 } = requireState(dir)
+  if (gate1.status !== 'approved') {
+    throw new Error('Cannot approve Gate 2 before Gate 1 requirement alignment is approved.')
+  }
   validateWorkbench(dir)
-  validateSuperpowerEvidence(dir, [SUPERPOWER_SKILLS.writingPlans], 'approve-gate1')
+  validatePlanWorkbench(dir, 'approve-gate2')
+  validateSuperpowerEvidence(dir, [SUPERPOWER_SKILLS.writingPlans], 'approve-gate2')
   const approvedAt = now()
 
-  writeJson(p.gate1, {
-    ...gate1,
+  writeJson(p.gate2, {
+    ...gate2,
     schemaVersion: SCHEMA_VERSION,
     status: 'approved',
     executionMode: mode,
@@ -1171,14 +1310,14 @@ function approveGate1(dir, flags) {
   })
   saveState(p, {
     ...state,
-    phase: 'gate-1-approved',
+    phase: 'gate-2-approved',
     executionMode: mode,
     allowWorktree,
     allowSubagents,
     allowCheckpointCommit
   })
 
-  console.log('Gate 1 approved.')
+  console.log('Gate 2 plan approved.')
   console.log(`Execution mode: ${mode}`)
   console.log(`Allow worktree: ${allowWorktree}`)
   console.log(`Allow subagents: ${allowSubagents}`)
@@ -1186,75 +1325,12 @@ function approveGate1(dir, flags) {
   syncMissionState(dir)
 }
 
-function requestGate2(dir, flags) {
-  const { p, state, gate1, gate2 } = requireState(dir)
-  const force = parseBoolean(flags.force, false)
-  if (gate1.status !== 'approved') {
-    throw new Error('Cannot request Gate 2 before Gate 1 is approved.')
-  }
-  if (gate2.status === 'approved' && !force) {
-    throw new Error('Gate 2 is already approved. Use --force true only when intentionally re-requesting it.')
-  }
-
-  writeJson(p.gate2, {
-    ...gate2,
-    schemaVersion: SCHEMA_VERSION,
-    status: 'pending',
-    reviewPack: flags['review-pack'] || gate2.reviewPack || 'reviews/review-packs.md',
-    validationReport: flags.validation || gate2.validationReport || 'reports/validation.md',
-    reviewAccepted: false,
-    validationAccepted: false,
-    requestedAt: now(),
-    notes: flags.notes || gate2.notes || ''
-  })
-  saveState(p, { ...state, phase: 'gate-2-pending' })
-  console.log('Gate 2 review requested.')
-  syncMissionState(dir)
-}
-
-function approveGate2(dir, flags) {
-  const { p, state, gate2 } = requireState(dir)
-  if (gate2.status !== 'pending') {
-    throw new Error('Gate 2 is not pending. Run request-gate2 first.')
-  }
-
-  const reviewAccepted = parseBoolean(flags.review, true)
-  const validationAccepted = parseBoolean(flags.validation, true)
-  if (!reviewAccepted || !validationAccepted) {
-    throw new Error('Gate 2 approval requires review and validation to be accepted. Use notes to record concerns, or keep Gate 2 pending.')
-  }
-
-  const nextGate2 = {
-    ...gate2,
-    schemaVersion: SCHEMA_VERSION,
-    status: 'approved',
-    reviewAccepted,
-    validationAccepted,
-    approvedAt: now(),
-    approvedBy: flags.by || 'user',
-    notes: flags.notes || gate2.notes || ''
-  }
-
-  writeJson(p.gate2, nextGate2)
-  saveState(p, { ...state, phase: 'gate-2-approved' })
-  console.log('Gate 2 review approved.')
-  syncMissionState(dir)
-}
-
 function requestGate3(dir, flags) {
-  const { p, state, gate1, gate2, gate3 } = requireState(dir)
+  const { p, state, gate2, gate3 } = requireState(dir)
   const force = parseBoolean(flags.force, false)
-  if (gate1.status !== 'approved') {
-    throw new Error('Cannot request Gate 3 before Gate 1 is approved.')
-  }
   if (gate2.status !== 'approved') {
-    throw new Error('Cannot request Gate 3 before Gate 2 review is approved.')
+    throw new Error('Cannot request Gate 3 before Gate 2 plan is approved.')
   }
-  validateSuperpowerEvidence(
-    dir,
-    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
-    'request-gate3'
-  )
   if (gate3.status === 'approved' && !force) {
     throw new Error('Gate 3 is already approved. Use --force true only when intentionally re-requesting it.')
   }
@@ -1263,11 +1339,15 @@ function requestGate3(dir, flags) {
     ...gate3,
     schemaVersion: SCHEMA_VERSION,
     status: 'pending',
+    reviewPack: flags['review-pack'] || gate3.reviewPack || 'reviews/review-packs.md',
+    validationReport: flags.validation || gate3.validationReport || 'reports/validation.md',
+    reviewAccepted: false,
+    validationAccepted: false,
     requestedAt: now(),
     notes: flags.notes || gate3.notes || ''
   })
   saveState(p, { ...state, phase: 'gate-3-pending' })
-  console.log('Gate 3 final-action requested.')
+  console.log('Gate 3 review requested.')
   syncMissionState(dir)
 }
 
@@ -1276,14 +1356,70 @@ function approveGate3(dir, flags) {
   if (gate3.status !== 'pending') {
     throw new Error('Gate 3 is not pending. Run request-gate3 first.')
   }
-  validateSuperpowerEvidence(
-    dir,
-    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
-    'approve-gate3'
-  )
+
+  const reviewAccepted = parseBoolean(flags.review, true)
+  const validationAccepted = parseBoolean(flags.validation, true)
+  if (!reviewAccepted || !validationAccepted) {
+    throw new Error('Gate 3 approval requires review and validation to be accepted. Use notes to record concerns, or keep Gate 3 pending.')
+  }
 
   const nextGate3 = {
     ...gate3,
+    schemaVersion: SCHEMA_VERSION,
+    status: 'approved',
+    reviewAccepted,
+    validationAccepted,
+    approvedAt: now(),
+    approvedBy: flags.by || 'user',
+    notes: flags.notes || gate3.notes || ''
+  }
+
+  writeJson(p.gate3, nextGate3)
+  saveState(p, { ...state, phase: 'gate-3-approved' })
+  console.log('Gate 3 review approved.')
+  syncMissionState(dir)
+}
+
+function requestGate4(dir, flags) {
+  const { p, state, gate3, gate4 } = requireState(dir)
+  const force = parseBoolean(flags.force, false)
+  if (gate3.status !== 'approved') {
+    throw new Error('Cannot request Gate 4 before Gate 3 review is approved.')
+  }
+  validateSuperpowerEvidence(
+    dir,
+    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
+    'request-gate4'
+  )
+  if (gate4.status === 'approved' && !force) {
+    throw new Error('Gate 4 is already approved. Use --force true only when intentionally re-requesting it.')
+  }
+
+  writeJson(p.gate4, {
+    ...gate4,
+    schemaVersion: SCHEMA_VERSION,
+    status: 'pending',
+    requestedAt: now(),
+    notes: flags.notes || gate4.notes || ''
+  })
+  saveState(p, { ...state, phase: 'gate-4-pending' })
+  console.log('Gate 4 final-action requested.')
+  syncMissionState(dir)
+}
+
+function approveGate4(dir, flags) {
+  const { p, state, gate4 } = requireState(dir)
+  if (gate4.status !== 'pending') {
+    throw new Error('Gate 4 is not pending. Run request-gate4 first.')
+  }
+  validateSuperpowerEvidence(
+    dir,
+    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
+    'approve-gate4'
+  )
+
+  const nextGate4 = {
+    ...gate4,
     schemaVersion: SCHEMA_VERSION,
     status: 'approved',
     allowMerge: parseBoolean(flags.merge, false),
@@ -1292,12 +1428,12 @@ function approveGate3(dir, flags) {
     allowCleanup: parseBoolean(flags.cleanup, false),
     approvedAt: now(),
     approvedBy: flags.by || 'user',
-    notes: flags.notes || gate3.notes || ''
+    notes: flags.notes || gate4.notes || ''
   }
 
-  writeJson(p.gate3, nextGate3)
-  saveState(p, { ...state, phase: 'gate-3-approved' })
-  console.log('Gate 3 final-action approved.')
+  writeJson(p.gate4, nextGate4)
+  saveState(p, { ...state, phase: 'gate-4-approved' })
+  console.log('Gate 4 final-action approved.')
   syncMissionState(dir)
 }
 
@@ -1306,9 +1442,9 @@ function check(dir, flags) {
   if (!action) throw new Error('Missing --action')
 
   validateKnownAction(action)
-  const { gate1, gate3 } = requireState(dir)
-  validateGate1(action, gate1)
-  validateGate3(action, gate3)
+  const { gate2, gate4 } = requireState(dir)
+  validateGate2(action, gate2)
+  validateGate4(action, gate4)
 
   const warnings = action === 'code' ? validateCodeMode(dir, flags) : []
   if (action === 'code') {
@@ -1316,7 +1452,7 @@ function check(dir, flags) {
       dir,
       [
         SUPERPOWER_SKILLS.testDrivenDevelopment,
-        gate1.allowSubagents === true
+        gate2.allowSubagents === true
           ? SUPERPOWER_SKILLS.subagentDrivenDevelopment
           : SUPERPOWER_SKILLS.executingPlans
       ],
@@ -1346,13 +1482,13 @@ function verify(dir, flags) {
   const result = verifySummary(dir, flags)
   const nextAction = result.ok
     ? {
-        summary: 'Gate 2 前关门检查已通过，可以请求 Gate 2 Review。',
-        command: 'node <skill-dir>/scripts/harness.js request-gate2 <需求工作台> --review-pack reviews/review-packs.md --validation reports/validation.md',
+        summary: 'Gate 3 前关门检查已通过，可以请求 Gate 3 Review。',
+        command: 'node <skill-dir>/scripts/harness.js request-gate3 <需求工作台> --review-pack reviews/review-packs.md --validation reports/validation.md',
         requiresHuman: false,
         blockedBy: []
       }
     : {
-        summary: 'Gate 2 前关门检查未通过，先修复 review/validation 材料。',
+        summary: 'Gate 3 前关门检查未通过，先修复 review/validation 材料。',
         command: 'node <skill-dir>/scripts/harness.js verify <需求工作台> --strict true',
         requiresHuman: false,
         blockedBy: result.problems
@@ -1381,10 +1517,11 @@ function main() {
     if (command === 'check-workbench') return checkWorkbench(dir)
     if (command === 'verify') return verify(dir, flags)
     if (command === 'approve-gate1') return approveGate1(dir, flags)
-    if (command === 'request-gate2') return requestGate2(dir, flags)
     if (command === 'approve-gate2') return approveGate2(dir, flags)
     if (command === 'request-gate3') return requestGate3(dir, flags)
     if (command === 'approve-gate3') return approveGate3(dir, flags)
+    if (command === 'request-gate4') return requestGate4(dir, flags)
+    if (command === 'approve-gate4') return approveGate4(dir, flags)
     if (command === 'check') return check(dir, flags)
     usage()
   } catch (error) {

@@ -36,7 +36,7 @@
 - Foundation Checkpoint：yes / no
 - 用户结论：pending / approved / changes-requested
 
-## Gate 2 Review 结论
+## Gate 3 Review 结论
 
 - Review Pack 是否完整：
 - Artifact 是否覆盖每个 RP 和 untracked 新文件：

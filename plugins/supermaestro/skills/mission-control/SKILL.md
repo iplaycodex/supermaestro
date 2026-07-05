@@ -29,9 +29,10 @@ description: Use when a medium or large software requirement needs staged planni
 - `workbench/context.md` 是共享上下文和导航页；`workbench/specs/` 只放可实现、可验收、可引用的规格文档。
 - 建立工作台时必须创建或更新标准 Markdown 占位文档，不能只创建目录；即使尚未编码，`reviews/review-packs.md` 和 `reports/validation.md` 也必须记录 pending 状态。
 - 如果发现接口文档、Swagger/OpenAPI、Postman、Mock 数据或后端依赖，必须创建或更新 `specs/api-spec.md`；接口规格是接口封装、mock、联调、异常空态和 API 验证的主事实源。
-- 未经过 Human Gate 1 确认，不创建 worktree、不切分支、不派发子 agent、不开始编码；`approve-gate1` 必须记录 `--confirmed-by user --confirmation "<用户确认原话或摘要>"`，不能由 agent 自行默认批准。
-- Human Gate 保持三层：Gate 1 确认计划和执行模式，Gate 2 确认 review pack 与验证结果，Gate 3 确认 merge、commit、push 或清理 worktree 等最终危险动作。
-- 未经过 Human Gate 2 确认，不进入最终动作申请；未经过 Human Gate 3 确认，不 merge、不 commit、不 push、不清理 worktree。
+- Human Gate 保持四层：Gate 1 确认需求理解与验收对齐，Gate 2 确认计划和执行模式，Gate 3 确认 review pack 与验证结果，Gate 4 确认 merge、commit、push 或清理 worktree 等最终危险动作。
+- 未经过 Human Gate 1 确认，不生成最终任务计划作为可执行授权依据；`approve-gate1` 必须记录 `--confirmed-by user --confirmation "<用户确认原话或摘要>"`，不能由 agent 自行默认批准。
+- 未经过 Human Gate 2 确认，不创建 worktree、不切分支、不派发子 agent、不开始编码；`approve-gate2` 必须记录计划确认原话和执行模式。
+- 未经过 Human Gate 3 确认，不进入最终动作申请；未经过 Human Gate 4 确认，不 merge、不 commit、不 push、不清理 worktree。
 - 不为了使用本技能强制创建多个子 agent；先给出执行档位：主控串行、单 worktree 串行、多个 worktree/子 agent 并发。
 - 执行能力必须动态插拔：只生成当前 Gate 1 档位实际需要且马上会被使用的工作台模块；串行模式不生成 worktree / multi-agent 专用文档。
 - Worktree 和子 agent 是两个独立开关：可以只用 worktree 做代码隔离，不派发子 agent；也可以主控串行使用多个 worktree。
@@ -41,14 +42,15 @@ description: Use when a medium or large software requirement needs staged planni
 - 编码 worker 默认必须评估 `superpowers:test-driven-development` 适用性。API/server/mock、hook、store、数据转换、状态机、跳转参数、权限/异常分支和业务计算等可测试行为必须先写失败测试并记录 RED/GREEN 证据；纯视觉还原、纯配置、资源搬运或生成代码可以跳过 TDD，但必须在任务卡、handoff 和 validation 中写明跳过原因。
 - 遇到 bug、测试失败、构建失败、联调异常或 reviewer 反馈中的行为问题时，必须按 `superpowers:systematic-debugging` 先做根因调查，再提出或实施修复。handoff/review pack 必须记录复现、根因假设、证据、最小修复和验证结果；不得把“猜测性修改”包装成修复。
 - Review Agent Checkpoint 必须吸收 `superpowers:requesting-code-review`：review agent 输入必须包含任务说明、需求/计划、base/head 或 diff 命令、验证证据和明确审查目标；review 输出必须 findings 优先。处理 review findings 时必须吸收 `superpowers:receiving-code-review`：主控/worker 先核实建议是否符合当前代码和需求，再逐项修复、复查或技术性驳回。
-- Gate 2/Gate 3 前必须吸收 `superpowers:verification-before-completion`：没有本轮新鲜验证命令、输出和结论，不得声称完成、通过或 ready；验证失败时如实停在 blocked/changes-needed。
-- Gate 3 收尾必须吸收 `superpowers:finishing-a-development-branch`：先验证，再判断 normal repo/worktree/detached 状态，再给出 merge/PR/keep/discard/cleanup 等动作影响；执行危险动作前仍以 Human Gate 3 和 CLI `check` 为准。
+- Gate 3/Gate 4 前必须吸收 `superpowers:verification-before-completion`：没有本轮新鲜验证命令、输出和结论，不得声称完成、通过或 ready；验证失败时如实停在 blocked/changes-needed。
+- Gate 4 收尾必须吸收 `superpowers:finishing-a-development-branch`：先验证，再判断 normal repo/worktree/detached 状态，再给出 merge/PR/keep/discard/cleanup 等动作影响；执行危险动作前仍以 Human Gate 4 和 CLI `check` 为准。
 - Superpowers 不是可选文案。凡本技能声明“必须/优先/默认吸收”的场景，必须先实际读取或调用对应 `superpowers:*` skill，并在 `reports/validation.md` 的“Superpowers 调用证据”表记录 `已读取/已调用/已吸收/已执行` 等证据；只在 `task-plan.md` 写“计划使用”不算通过。脚本硬闸门会在以下动作拒绝缺证据流程：
-  - `check-workbench` / `approve-gate1`：必须有 `superpowers:writing-plans` 证据。
-  - `check --action code`：必须有 `superpowers:test-driven-development` 证据；按 Gate 1 执行模式还必须有 `superpowers:subagent-driven-development` 或 `superpowers:executing-plans` 证据。
+  - `check-workbench` / `approve-gate1`：必须有 `specs/requirement-alignment.md` 且记录用户已确认的需求对齐证据。
+  - `approve-gate2`：必须有 `plans/task-plan.md` 等计划文档和 `superpowers:writing-plans` 证据。
+  - `check --action code`：必须有 `superpowers:test-driven-development` 证据；按 Gate 2 执行模式还必须有 `superpowers:subagent-driven-development` 或 `superpowers:executing-plans` 证据。
   - `check --action dispatch-subagent`：必须有 `superpowers:subagent-driven-development` 证据。
-  - `verify --strict` / `request-gate2`：必须有 `superpowers:verification-before-completion` 证据，并按实际触发补齐 TDD、SDD/serial、debugging、requesting/receiving review 证据。
-  - `request-gate3` / `approve-gate3` / final action `check`：必须有 `superpowers:verification-before-completion` 和 `superpowers:finishing-a-development-branch` 证据。
+  - `verify --strict` / `request-gate3`：必须有 `superpowers:verification-before-completion` 证据，并按实际触发补齐 TDD、SDD/serial、debugging、requesting/receiving review 证据。
+  - `request-gate4` / `approve-gate4` / final action `check`：必须有 `superpowers:verification-before-completion` 和 `superpowers:finishing-a-development-branch` 证据。
 - 中大型需求必须把 reviewability 作为 Gate 1 硬约束；review pack 必须对应实际可审查产物（worktree 未提交 diff、patch、PR，或用户明确授权后的 local commit），不能只停留在 Markdown 文件列表。
 - 每个编码任务必须形成独立 review pack。预计超过 5-8 个文件或跨多个功能面时，继续拆分。
 - 默认禁止自动 commit：编码任务完成后保持 worktree 中的未提交改动供用户 review；只有用户在对应 review 后明确授权提交、commit 或 checkpoint commit，才允许执行本地 commit。
@@ -57,7 +59,7 @@ description: Use when a medium or large software requirement needs staged planni
 - Foundation 不是单个“大包”任务。规划时按公共契约面拆小：API/server/mock、route/scheme、公共 UI 组件、测试/fixture 等应优先拆成 F1a/F1b/F1c 或多个 RP；单个 foundation 预计超过 5-8 个文件、跨 3 个以上目录或同时覆盖 3 类契约面时，必须继续拆分并说明 review 顺序。
 - Foundation 经用户 human-approved 后，如果下游 worktree 依赖该公共基线，推荐并允许创建本地 checkpoint commit 作为 downstream base；后续 P 类 worktree 必须基于该 checkpoint commit 创建，保证 P-only diff 干净。不得默认把未提交 foundation 基线复制进每个 feature worktree；如果用户不允许 checkpoint commit，必须改用串行、单 worktree 或 per-RP patch 方案，并在 Gate 1 说明 review 成本。
 - 标准 git worktree 是独立工作区，不自带忽略文件和依赖目录；需要可运行时，必须在每个 worktree 安装依赖或明确使用完整项目拷贝模式。完整项目拷贝不是标准 worktree 模式，采用时必须用 patch/commit 作为 review artifact 管理差异。
-- Foundation Review Checkpoint 不新增正式 Gate 层级；Human Gate 仍保持三层。但它是 Gate 1 后、依赖切片开始前的强制人工检查点，必须写入计划、进度和 review pack。
+- Foundation Review Checkpoint 不新增正式 Gate 层级；Human Gate 仍保持四层。但它是 Gate 2 后、依赖切片开始前的强制人工检查点，必须写入计划、进度和 review pack。
 - 预计命中复杂度阈值（多页面、多画板、公共组件/接口/路由、超过 8 个文件、同时新增和改造页面）时，不推荐 `main-serial + checkpoint=false`；如用户仍选择，Gate 1 Brief 必须明确 review 成本并安排 per-RP patch。
 - 验证必须按风险分级，不能把 parser、formatter、`git diff --check` 当成行为验证。页面/组件任务至少要尝试可运行的页面级构建、聚焦测试、渲染/截图、mock 链路或路由检查；无法执行时必须写清真实阻塞和剩余风险。
 - Gate 2 前必须输出人可执行的 review brief：按顺序列出要 review 的 RP、每个 RP 的 diff 命令、涉及文件、验证证据和未验证风险。不要只让用户翻工作台文档。
@@ -120,6 +122,7 @@ documents/<需求同名目录>/
     │   ├── gate-2-decision.json
     │   └── gate-3-decision.json
     ├── specs/
+    │   ├── requirement-alignment.md
     │   ├── api-spec.md
     │   ├── ui-material-index.md
     │   ├── ui-schema-extract.md
@@ -192,7 +195,7 @@ node <skill-dir>/scripts/supermaestro.js next <需求工作台>
 node <skill-dir>/scripts/supermaestro.js resume <需求工作台>
 ```
 
-`next` / `resume` 会刷新 `mission.state.json`，输出当前阶段、三层 Gate 状态、推荐下一步、建议命令、是否需要人工确认和阻塞项。它只做流程导航，不替代 `state.json` 和 `events.jsonl`。
+`next` / `resume` 会刷新 `mission.state.json`，输出当前阶段、四层 Gate 状态、推荐下一步、建议命令、是否需要人工确认和阻塞项。它只做流程导航，不替代 `state.json` 和 `events.jsonl`。
 
 Gate 1 前工作台完整性检查：
 
@@ -200,24 +203,32 @@ Gate 1 前工作台完整性检查：
 node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 ```
 
-`check-workbench` 会检查标准工作台文档是否存在且非空；共享上下文优先检查 `workbench/context.md`，并兼容旧路径 `specs/context.md`；存在接口/API/mock 物料时，还会检查 `specs/api-spec.md`；存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json` 时，还会检查 `specs/ui-material-index.md` 和 `specs/ui-schema-extract.md`；同时存在 API 和 UI 物料时，还会检查 `specs/page-contract-matrix.md`。缺少 `plans/progress.md` 等文件时必须先补齐占位文档，不能进入 Gate 1。
+`check-workbench` 会检查 Gate 1 需求对齐所需文档是否存在且非空；共享上下文优先检查 `workbench/context.md`，并兼容旧路径 `specs/context.md`；必须检查 `specs/requirement-alignment.md` 且其中有用户已确认的需求理解证据；存在接口/API/mock 物料时，还会检查 `specs/api-spec.md`；存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json` 时，还会检查 `specs/ui-material-index.md` 和 `specs/ui-schema-extract.md`；同时存在 API 和 UI 物料时，还会检查 `specs/page-contract-matrix.md`。
 
-Gate 1 确认：
+Gate 1 需求对齐确认：
 
 ```bash
-node <skill-dir>/scripts/supermaestro.js approve-gate1 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation "<用户确认原话或摘要>" --worktree <true|false> --subagents <true|false> --checkpoint <true|false>
+node <skill-dir>/scripts/supermaestro.js approve-gate1 <需求工作台> --confirmed-by user --confirmation "<用户确认原话或摘要>"
 ```
 
-Gate 2 Review 请求和确认：
+Gate 2 计划确认：
 
 ```bash
-node <skill-dir>/scripts/supermaestro.js request-gate2 <需求工作台> --review-pack reviews/review-packs.md --validation reports/validation.md
+node <skill-dir>/scripts/supermaestro.js approve-gate2 <需求工作台> --mode <main-serial|single-worktree-serial|multi-worktree-parallel> --confirmed-by user --confirmation "<用户确认原话或摘要>" --worktree <true|false> --subagents <true|false> --checkpoint <true|false>
 ```
 
-Gate 3 最终动作请求和确认（当前脚本只提供 `check --action commit|merge|push|cleanup` 护栏；正式 approve-gate3 后续补齐前，不要自动执行最终动作）：
+Gate 3 Review 请求和确认：
 
 ```bash
-node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action commit
+node <skill-dir>/scripts/supermaestro.js request-gate3 <需求工作台> --review-pack reviews/review-packs.md --validation reports/validation.md
+node <skill-dir>/scripts/supermaestro.js approve-gate3 <需求工作台> --review true --validation true
+```
+
+Gate 4 最终动作请求和确认：
+
+```bash
+node <skill-dir>/scripts/supermaestro.js request-gate4 <需求工作台>
+node <skill-dir>/scripts/supermaestro.js approve-gate4 <需求工作台> --merge false --commit false --push false --cleanup false
 ```
 
 危险动作前检查：
@@ -228,27 +239,27 @@ node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action commit
 node <skill-dir>/scripts/supermaestro.js check <需求工作台> --action push
 ```
 
-Gate 1 后按执行档位生成可选模块：
+Gate 2 后按执行档位生成可选模块：
 
 ```bash
-# 当前版本由主控按 Gate 1 选择手动生成必要目录；后续可接入 scaffold-execution-mode.js。
+# 当前版本由主控按 Gate 2 选择手动生成必要目录；后续可接入 scaffold-execution-mode.js。
 ```
 
-Gate 2 前检查 review 可审查性：
-
-```bash
-node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
-```
-
-Gate 2 前统一关门检查：
+Gate 3 前检查 review 可审查性：
 
 ```bash
 node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 ```
 
-`verify --strict` 会组合检查工作台完整性、Gate 1 状态、review pack 和 `reports/validation.md` 的验证证据；通过后才请求 Gate 2。更细的 diff/patch/PR reviewability 检查后续作为 adapter 增强。
+Gate 3 前统一关门检查：
 
-普通非 UI 编码只需要 Gate 1 通过；如果存在 UI manifest，仍必须额外带 `--non-ui true --reason <原因>`。UI 编码必须额外带 `--ui true --boards --schemas --schema-extract`。
+```bash
+node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
+```
+
+`verify --strict` 会组合检查工作台完整性、Gate 2 状态、review pack 和 `reports/validation.md` 的验证证据；通过后才请求 Gate 3。更细的 diff/patch/PR reviewability 检查后续作为 adapter 增强。
+
+普通非 UI 编码需要 Gate 2 通过；如果存在 UI manifest，仍必须额外带 `--non-ui true --reason <原因>`。UI 编码必须额外带 `--ui true --boards --schemas --schema-extract`。
 
 ## 工作流
 
@@ -275,14 +286,30 @@ node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 - 如果存在 `../source/ui/manifest.json`，或旧式 `../input/ui/manifest.json` / `ui/manifest.json`，运行 `scripts/inspect-ui.js <需求工作台> --write-index true`。
 - 如果存在 `../source/ui/schemas/*.json`，必须创建或更新 `specs/ui-schema-extract.md`，并按画板写入节点级 Sketch Data 提取结果和 Schema 到实现映射表占位；图片缺失时记录 `schema-only`，不得把图片缺失记为可以跳过 UI 还原。
 - 如果同时存在 API 物料和 UI 物料，生成或更新 `specs/page-contract-matrix.md`：按页面/模块绑定 PRD source_ref、UI 画板/schema、API/mock、公共契约、Review Pack 和阻塞项；没有页面契约矩阵不得把多页面需求推进到 Gate 1。
+- 生成或更新 `specs/requirement-alignment.md`：只做需求语义对齐，不写实现计划。必须包含需求一句话复述、角色/业务目标、范围内/范围外、主流程、规则、例子、AI 推断、待确认问题、验收场景和用户确认摘要。阻塞级问题未确认时不得通过 Gate 1。
 - 生成或更新根目录 `context.md`：使用 `templates/context-template.md`，沉淀 PRD 摘要、业务规则、技术上下文、UI 契约、任务依赖、风险假设和验证计划。多 agent、worktree、长流程恢复前必须先读这份共享上下文。
 - 生成或更新 `plans/progress.md`：使用 `templates/progress-template.md`，先写当前阶段、任务状态表、进度日志、阻塞决策和验证进展；不要把动态任务状态只写在 `task-plan.md`。
 - 生成或更新 `reviews/review-packs.md`：使用 `templates/review-packs-template.md`，先写每个 RP 的审查目标、预期 artifact、建议审查顺序和 pending 验证；不要复制长文件清单或重复 progress 状态。
 - 生成或更新 `reports/validation.md`：使用 `templates/validation-template.md`，先记录已完成的规划/体检/API 检查、未执行检查和 pending 状态；不要等最终验证才创建文件。
 
-### 3. 生成计划
+### 3. 需求对齐
 
-生成计划前先读取 `references/execution-modes.md` 判断复杂度、执行档位、动态模块和 review artifact。
+Gate 1 前先生成 `specs/requirement-alignment.md`，并输出 Requirement Alignment Brief。该阶段只确认人和 AI 是否理解一致，不授权编码、不创建 worktree、不派发 agent。
+
+对齐文档至少包含：
+
+- 需求一句话复述。
+- 角色、业务目标、范围内、范围外。
+- 主流程、关键规则、例子和验收场景。
+- AI 推断项、依据和风险。
+- 待确认问题及处理结论。
+- 用户确认摘要。
+
+阻塞级待确认问题未关闭时，不得运行 `approve-gate1`。
+
+### 4. 生成计划
+
+Gate 1 通过后，生成计划前先读取 `references/execution-modes.md` 判断复杂度、执行档位、动态模块和 review artifact。
 
 当需求包含多个页面、模块、公共组件、接口或不确定依赖时，读取 `references/split-strategy.md`。
 
@@ -305,9 +332,9 @@ node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 - 默认 feature review artifact 使用独立 worktree 的未提交 diff、patch 文件或 PR；不要把 feature local commit 当成默认 review artifact。Foundation human-approved 后用于解锁下游的本地 checkpoint commit 是例外，但必须先获得用户确认并写入计划、progress 和 review pack。
 - 每个任务的边界、依赖、验证要求和 review pack。Foundation 任务必须列出契约面、预计文件数、拆分理由和放行后是否生成 checkpoint commit；feature 任务必须列出 downstream base、P-only diff 命令和可运行性准备方式。详细任务卡只在任务边界复杂到 `task-plan.md` 放不下时生成。
 
-### 4. Human Gate 1
+### 5. Human Gate 1：需求对齐确认
 
-开始编码、创建 worktree、切分支或派发子 agent 前，必须停下让用户确认。
+生成最终任务计划、开始编码、创建 worktree、切分支或派发子 agent 前，必须先停下让用户确认需求理解一致。
 
 输出 Decision Brief 前，必须运行：
 
@@ -315,19 +342,34 @@ node <skill-dir>/scripts/supermaestro.js verify <需求工作台> --strict true
 node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 ```
 
-如果检查失败，先补齐缺失文档再进入 Gate 1。`approve-gate1` 也会执行同样检查，缺少 `context.md`、`plans/progress.md`、`specs/api-spec.md`、`reviews/review-packs.md`、`reports/validation.md` 等必要文档，或缺少 `superpowers:writing-plans` 调用证据时不得确认。
+如果检查失败，先补齐缺失文档再进入 Gate 1。`approve-gate1` 也会执行同样检查，缺少 `context.md`、`specs/requirement-alignment.md`、必要的 `specs/api-spec.md` / UI 规格 / 页面契约矩阵，或需求对齐文档未记录用户已确认摘要时不得确认。
 
-给用户一份简短 Decision Brief：
+给用户一份简短 Requirement Alignment Brief：
 
-- 当前推荐执行档位。
-- 当前阶段、任务状态和阻塞项摘要。
+- AI 对需求的一句话复述。
+- 范围内 / 范围外。
+- 主流程、关键规则、例子和验收场景。
+- AI 推断项和依据。
+- 阻塞级待确认问题。
 - API Discovery 状态：真实接口清单是否已解析、公共/页面/范围外接口是否已分类，哪些接口仍是推断。
 - 页面契约矩阵状态：每个页面/模块是否已绑定 PRD、UI、API/mock 和 RP；缺口是否阻塞。
 - UI 资料包健康状态和是否阻塞。
 - UI 最终画板绑定状态：截图/用户描述中的画板名是否与 manifest/schema 完全匹配；是否存在同名旧稿、备份稿、版本稿；若不匹配，必须请求用户确认或重新导出，不能继续编码。
 - UI 资源映射状态：强视觉节点需要的 OSS/本地切图是否已清单化；是否存在待确认资源名或只能推断的资源路径。
 - 接口规格、Mock/API 契约状态和是否阻塞。
-- 需要确认的 3-5 个具体决策。
+- 需要确认的 3-5 个具体需求语义问题。
+
+用户确认后，运行 `approve-gate1` 写入需求对齐状态，且必须用 `--confirmation` 保存用户确认原话或摘要。随后才能把需求理解转成最终 `task-plan.md`。
+
+### 6. Human Gate 2：计划确认
+
+开始编码、创建 worktree、切分支或派发子 agent 前，必须停下让用户确认计划和执行模式。
+
+Gate 2 Decision Brief 必须说明：
+
+- 当前推荐执行档位。
+- 当前阶段、任务状态和阻塞项摘要。
+- 任务 DAG、Foundation Checkpoint、review pack 和验证策略。
 - 每个选择的影响。
 - 每个选择的 review 成本、单包文件数预估、回滚方式和是否能单独测试。
 - 如果存在公共依赖，列出 Foundation Review Checkpoint、被阻塞的下游任务、checkpoint 审查内容和放行条件。
@@ -336,9 +378,9 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 - 将生成哪些可选工作台模块；未启用的 worktree/multi-agent 模块不得生成。
 - 推荐确认语必须匹配实际档位，例如：“按推荐继续，foundation 拆小先行，使用项目旁 worktree 隔离，foundation human-approved 后允许本地 checkpoint commit，下游基于 checkpoint commit 创建，每个 worker 完成后开只读 review agent，不自动提交 feature 改动，review 后再决定提交。”；如果不采用 checkpoint commit，必须明确替代的 patch/串行方案和 review 成本。
 
-用户确认后，运行 `approve-gate1` 写入状态，且必须用 `--confirmation` 保存用户确认原话或摘要；随后只生成当前档位实际需要的可选模块。需要真实 agent、review agent、契约变更或独立集成计划时，必须在 `plans/progress.md` 和 `state.json` 中同步记录。
+用户确认后，运行 `approve-gate2` 写入计划确认状态，且必须用 `--confirmation` 保存用户确认原话或摘要；随后只生成当前档位实际需要的可选模块。需要真实 agent、review agent、契约变更或独立集成计划时，必须在 `plans/progress.md` 和 `state.json` 中同步记录。
 
-### 5. 执行任务
+### 7. 执行任务
 
 - 编码型子 agent 默认使用独立 worktree 或独立分支；如果降级到主工作区串行，必须说明原因和 review pack 拆分方案。
 - 启用真实子 agent 且任务相互独立时，主控优先按 `superpowers:subagent-driven-development` 执行：给每个 worker 提供完整任务卡和必要上下文，worker 完成后先做任务范围/规格符合性检查，再进入代码质量 review。不要让 worker 继承主会话的全部上下文或自行扩展任务范围。
@@ -365,13 +407,13 @@ node <skill-dir>/scripts/supermaestro.js check-workbench <需求工作台>
 - UI 编码过程中发现实现结构与 Sketch Data 明显不一致，或发现某个视觉节点需要图片资产但当前用 CSS 近似时，必须立刻暂停并更新 `plans/progress.md` 为 blocked/changes-needed；不能把问题留到 Gate 2 或交给用户肉眼兜底。
 - 任务状态更新直接写 `plans/progress.md`，不再通过 CLI 维护任务 CRUD；只有任务拆分、依赖或边界变化时才更新 `plans/task-plan.md`。
 
-### 6. 审查与验证
+### 8. 审查与验证
 
 完成任务前读取 `references/validation-checklist.md`。
 
-Gate 2 前运行 `scripts/supermaestro.js verify <需求工作台> --strict true`。如果失败，先补齐工作台、per-RP branch、未提交 diff、patch、PR、review agent fan-in 或验证证据，再请求 Gate 2；不要为了通过 reviewability 检查自动 commit。
+Gate 3 前运行 `scripts/supermaestro.js verify <需求工作台> --strict true`。如果失败，先补齐工作台、per-RP branch、未提交 diff、patch、PR、review agent fan-in 或验证证据，再请求 Gate 3；不要为了通过 reviewability 检查自动 commit。
 
-Gate 2/Gate 3 或任何完成声明前，必须执行 `superpowers:verification-before-completion` 的证据优先规则：识别能证明结论的命令，运行完整命令，读取输出和 exit code，并把证据写入 `reports/validation.md`。没有新鲜证据时只能报告“未验证/部分验证”，不能说完成或通过。
+Gate 3/Gate 4 或任何完成声明前，必须执行 `superpowers:verification-before-completion` 的证据优先规则：识别能证明结论的命令，运行完整命令，读取输出和 exit code，并把证据写入 `reports/validation.md`。没有新鲜证据时只能报告“未验证/部分验证”，不能说完成或通过。
 
 每个任务交接必须包含：
 
@@ -383,7 +425,7 @@ Gate 2/Gate 3 或任何完成声明前，必须执行 `superpowers:verification-
 - 行为验证优先级：能跑聚焦测试就跑聚焦测试；能做页面/组件构建就跑构建；能做渲染/截图/路由/mock 链路检查就做对应检查。parser、formatter、`git diff --check` 只能作为最低静态检查，不能单独支撑“可工作”结论。
 - UI 任务的 Sketch Data 提取证据、expected、actual、diff 或无法截图原因。
 - UI 任务的最终画板绑定证据、资源引用清单、Schema 到实现映射表；如果图片基线缺失，必须提供 schema-only 验收证据，不能只写“未截图”。
-- UI 还原审查必须包含“强视觉区域逐块检查”：画板根/导航/首屏主体/关键卡片/重复组件/按钮/图标/图片资源/滚动后内容。每块都要记录设计依据、实现位置、验证方式和结论；存在未核对块时，不得请求 Gate 2。
+- UI 还原审查必须包含“强视觉区域逐块检查”：画板根/导航/首屏主体/关键卡片/重复组件/按钮/图标/图片资源/滚动后内容。每块都要记录设计依据、实现位置、验证方式和结论；存在未核对块时，不得请求 Gate 3。
 - review pack：文件列表、建议 diff 命令、验证证据、排除项。
 - 剩余风险和跳过的检查。
 
@@ -396,49 +438,49 @@ Review Agent Checkpoint 启用时：
 - review agent 只能读代码和写 review 记录；不得修改源码、暂存、commit、merge、push 或清理 worktree。
 - 有 P0/P1/P2 阻塞问题时，该 RP 不得进入人工 review；修复后重新进入 `ready-for-agent-review`。
 
-Foundation Review Checkpoint 的交接还必须包含：公共契约说明、下游任务清单、典型 mock/状态覆盖、API/组件 props 或页面入口契约、兼容性风险、回滚方式，以及用户确认结果。checkpoint 未确认或被打回时，不得把依赖它的下游 review pack 送入 Gate 2。
+Foundation Review Checkpoint 的交接还必须包含：公共契约说明、下游任务清单、典型 mock/状态覆盖、API/组件 props 或页面入口契约、兼容性风险、回滚方式，以及用户确认结果。checkpoint 未确认或被打回时，不得把依赖它的下游 review pack 送入 Gate 3。
 
 使用 `templates/review-packs-template.md` 写 `reviews/review-packs.md`。
 
 使用 `templates/validation-template.md` 写 `reports/validation.md`，记录验证命令、未执行检查、API/Mock 结果、UI/视觉证据和最终交接状态。
 
-### 7. Human Gate 2 Review
+### 9. Human Gate 3 Review
 
-实现任务完成后，merge、commit、push 或清理 worktree 前，必须先进入 Gate 2 Review。
+实现任务完成后，merge、commit、push 或清理 worktree 前，必须先进入 Gate 3 Review。
 
-请求 Gate 2 前输出 Decision Brief：
+请求 Gate 3 前输出 Decision Brief：
 
-- `verify --strict` 是否通过；如果失败，不得请求 Gate 2。
+- `verify --strict` 是否通过；如果失败，不得请求 Gate 3。
 - 新鲜验证证据：本轮实际运行了哪些命令、exit code、失败数或通过数；不得引用过期结果来证明当前状态。
 - 已完成的 review pack，按建议 review 顺序列出；feature RP 必须能用 P-only diff 查看，不混入已 human-approved 的 foundation 基线。
 - 每个 RP 的直接 diff 命令、worktree 路径、涉及文件和建议关注点。
-- 如果启用 review agent，列出每个 RP 的 agent review 结论、findings 摘要和 unresolved 数量；未通过 agent review 的 RP 不得请求 Gate 2。
+- 如果启用 review agent，列出每个 RP 的 agent review 结论、findings 摘要和 unresolved 数量；未通过 agent review 的 RP 不得请求 Gate 3。
 - 关键验证证据和未执行检查；明确区分静态检查、行为验证、构建验证和人工 UI 对比。
 - TDD 覆盖结论：哪些 RP 完成 RED/GREEN，哪些 RP 跳过或延后 TDD，跳过/延后原因是否已被用户或主控接受。
-- UI RP 必须单列视觉还原结论：最终画板是否匹配、资源映射是否完整、强视觉区域是否逐块核对、actual 截图或 schema-only 人工验收是否完成。若只完成静态检查，Gate 2 Decision Brief 必须明确写成未通过视觉验收，不能写 ready。
+- UI RP 必须单列视觉还原结论：最终画板是否匹配、资源映射是否完整、强视觉区域是否逐块核对、actual 截图或 schema-only 人工验收是否完成。若只完成静态检查，Gate 3 Decision Brief 必须明确写成未通过视觉验收，不能写 ready。
 - `reports/validation.md` 中的验证状态、剩余风险和跳过项。
 - `plans/progress.md` 中的完成状态、阻塞项和验证进展。
 - 当前是否还有未提交、未跟踪或只存在于 worktree 的文件。
 - Review artifact 是否覆盖 untracked 新文件和每个 RP。
-- 需要用户确认的 review 结论，例如：“Review Pack 与验证记录已确认，允许进入 Gate 3 最终动作申请。”
+- 需要用户确认的 review 结论，例如：“Review Pack 与验证记录已确认，允许进入 Gate 4 最终动作申请。”
 
-用户确认后运行 `request-gate2` 和 `approve-gate2`。Gate 2 只表示 review pack 与验证结果被接受，不授权 merge、commit、push 或清理。
+用户确认后运行 `request-gate3` 和 `approve-gate3`。Gate 3 只表示 review pack 与验证结果被接受，不授权 merge、commit、push 或清理。
 
-### 8. Human Gate 3 与收尾
+### 10. Human Gate 4 与收尾
 
-merge、commit、push 或清理 worktree 前，必须进入 Gate 3。
+merge、commit、push 或清理 worktree 前，必须进入 Gate 4。
 
-请求 Gate 3 前输出 Decision Brief：
+请求 Gate 4 前输出 Decision Brief：
 
 - 当前推荐动作组合。
 - 每个动作的影响。
-- Gate 2 Review 是否已确认。
+- Gate 3 Review 是否已确认。
 - 收尾环境判断：normal repo / linked worktree / detached HEAD；worktree 是否由本流程创建；可安全清理范围。
 - 最终动作前验证证据：merge/commit/push/cleanup 前最近一次测试、构建、diff 或 reviewability 检查结果。
 - 是否已完成最终状态同步和验证记录。
 - 当前是否还有未提交、未跟踪或只存在于 worktree 的文件。
 
-用户确认后运行 `request-gate3` 和 `approve-gate3`。执行具体动作前再运行对应 `check`。merge/PR/keep/discard/cleanup 选择必须遵循 `finishing-a-development-branch` 的安全顺序：验证先于动作，merge 成功后再清理，discard 必须额外确认，PR/keep 不清理 worktree。
+用户确认后运行 `request-gate4` 和 `approve-gate4`。执行具体动作前再运行对应 `check`。merge/PR/keep/discard/cleanup 选择必须遵循 `finishing-a-development-branch` 的安全顺序：验证先于动作，merge 成功后再清理，discard 必须额外确认，PR/keep 不清理 worktree。
 
 最终答复必须说明：
 
@@ -456,4 +498,4 @@ merge、commit、push 或清理 worktree 前，必须进入 Gate 3。
 - “按主控加多个子 agent 的流程跑这个 PRD。”
 - “这个需求比较大，帮我拆成 worktree 并发任务并监控进度。”
 - “先读 PRD，生成共享上下文、任务 DAG、agent 分工和验收计划。”
-- “先到 Gate 1，让我确认任务拆分和是否开子 agent。”
+- “先到 Gate 2，让我确认任务拆分和是否开子 agent。”

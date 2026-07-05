@@ -19,21 +19,21 @@
 
 | Skill | 触发场景 | 结果 | 证据 |
 | --- | --- | --- | --- |
-| `superpowers:writing-plans` | Gate 1 任务计划 | pending / 已读取并吸收 |  |
+| `superpowers:writing-plans` | Gate 2 任务计划 | pending / 已读取并吸收 |  |
 | `superpowers:test-driven-development` | 编码任务或行为变更 | pending / 已读取并吸收 / not-applicable |  |
-| `superpowers:subagent-driven-development` | Gate 1 启用真实子 agent | pending / 已读取并执行 / not-needed |  |
+| `superpowers:subagent-driven-development` | Gate 2 启用真实子 agent | pending / 已读取并执行 / not-needed |  |
 | `superpowers:executing-plans` | 未启用子 agent 的串行执行 | pending / 已读取并执行 / not-needed |  |
 | `superpowers:systematic-debugging` | bug、测试失败、构建失败、联调异常或行为 review finding | pending / 已读取并执行 / not-needed |  |
 | `superpowers:requesting-code-review` | Review Agent Checkpoint | pending / 已读取并执行 / not-needed |  |
 | `superpowers:receiving-code-review` | changes-requested 处理 | pending / 已读取并执行 / not-needed |  |
-| `superpowers:verification-before-completion` | Gate 2/Gate 3/完成声明前 | pending / 已读取并执行 |  |
-| `superpowers:finishing-a-development-branch` | Gate 3 final action | pending / 已读取并执行 / not-needed |  |
+| `superpowers:verification-before-completion` | Gate 3/Gate 4/完成声明前 | pending / 已读取并执行 |  |
+| `superpowers:finishing-a-development-branch` | Gate 4 final action | pending / 已读取并执行 / not-needed |  |
 
 ## 完成前验证
 
 | 声明/动作 | 证明命令 | 执行时间 | Exit code | 输出摘要 | 结论 |
 | --- | --- | --- | --- | --- | --- |
-| Gate 2 ready / Gate 3 ready / merge / commit / push / cleanup |  |  |  |  | pending |
+| Gate 3 ready / Gate 4 ready / merge / commit / push / cleanup |  |  |  |  | pending |
 
 ## TDD 证据汇总
 
@@ -82,10 +82,10 @@ schema-only 验证：
 
 - 改动范围：
 - Review Pack：
-- Gate 2 Review：
-- Gate 3 最终动作：
-- Gate 3 环境：normal repo / linked worktree / detached HEAD
-- Gate 3 选择：merge local / push PR / keep / discard / cleanup
+- Gate 3 Review：
+- Gate 4 最终动作：
+- Gate 4 环境：normal repo / linked worktree / detached HEAD
+- Gate 4 选择：merge local / push PR / keep / discard / cleanup
 - 进度同步：
 - 已提交/未提交状态：
 - 是否已 merge：

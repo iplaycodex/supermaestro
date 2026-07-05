@@ -4,10 +4,11 @@
 
 - 需求：
 - 阶段：Gate 1 pending
-- Gate 1：pending
+- Gate 1 需求对齐：pending
+- Gate 2 计划确认：not-requested
 - Foundation Checkpoint：not-needed / pending / approved / changes-requested
-- Gate 2 Review：not-requested
-- Gate 3 Final：not-requested
+- Gate 3 Review：not-requested
+- Gate 4 Final：not-requested
 - 当前任务：
 - 最近更新：
 - 下一步：
@@ -62,7 +63,7 @@
 | --- | --- | --- | --- |
 |  | static / behavior / build / ui-review | pending |  |
 
-## Gate 3 收尾状态
+## Gate 4 收尾状态
 
 | 项 | 状态 | 证据/备注 |
 | --- | --- | --- |

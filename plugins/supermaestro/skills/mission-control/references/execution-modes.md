@@ -5,8 +5,8 @@
 ## 核心原则
 
 - Core 模块永远启用：`context.md`、必要的 `specs/`、`plans/task-plan.md`、`plans/progress.md`、`reviews/review-packs.md`、`reports/validation.md`。
-- Worktree 模块只在 Gate 1 `allowWorktree=true` 且真实创建 worktree 时启用；默认只生成 `worktrees/plan.md`，任务状态仍写 `plans/progress.md`。
-- Multi-agent 模块只在 Gate 1 `allowSubagents=true` 且派发真实外部 agent/thread 时启用；主控自己执行的任务不得生成 agent brief/handoff。
+- Worktree 模块只在 Gate 2 `allowWorktree=true` 且真实创建 worktree 时启用；默认只生成 `worktrees/plan.md`，任务状态仍写 `plans/progress.md`。
+- Multi-agent 模块只在 Gate 2 `allowSubagents=true` 且派发真实外部 agent/thread 时启用；主控自己执行的任务不得生成 agent brief/handoff。
 - Review-agent 模块在 `allowSubagents=true` 且存在真实编码 worker 时默认启用；用户明确关闭时才跳过，并在 Gate 1 记录风险。它生成 `reviews/code-review/`，不新增正式 Gate。
 - Review artifact 模块按 reviewability 启用：默认 feature 使用 per-RP worktree diff 或 patch；foundation human-approved 且要解锁下游时，允许本地 checkpoint commit 作为 downstream base；使用 worktree 时，后续 feature review 必须提供基于该 base 的 P-only diff/patch。
 - Contract-change 模块只在发生或预计发生公共契约变更请求时启用；不要为空机制生成目录。

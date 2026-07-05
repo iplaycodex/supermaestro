@@ -23,7 +23,8 @@ const DEFAULT_STATE = {
   gates: {
     gate1: 'pending',
     gate2: 'locked',
-    gate3: 'locked'
+    gate3: 'locked',
+    gate4: 'locked'
   },
   execution: {
     mode: null,
@@ -74,14 +75,26 @@ function main() {
       case 'approve-gate1':
         approveGate1(workbench, options);
         break;
+      case 'approve-gate2':
+        approveGate2(workbench, options);
+        break;
       case 'check':
         checkAction(workbench, options);
         break;
       case 'verify':
         verify(workbench, options);
         break;
-      case 'request-gate2':
-        requestGate2(workbench, options);
+      case 'request-gate3':
+        requestGate3(workbench, options);
+        break;
+      case 'approve-gate3':
+        approveGate3(workbench, options);
+        break;
+      case 'request-gate4':
+        requestGate4(workbench, options);
+        break;
+      case 'approve-gate4':
+        approveGate4(workbench, options);
         break;
       default:
         throw new Error(`Unknown command: ${command}`);
@@ -123,6 +136,7 @@ function status(workbench) {
   console.log(`Gate 1: ${state.gates.gate1}`);
   console.log(`Gate 2: ${state.gates.gate2}`);
   console.log(`Gate 3: ${state.gates.gate3}`);
+  console.log(`Gate 4: ${state.gates.gate4}`);
   console.log(`Mode: ${state.execution.mode || '-'}`);
   console.log(`Workbench: ${workbench}`);
 }
@@ -159,7 +173,7 @@ function checkWorkbench(workbench) {
     throw new Error(`Workbench check failed. Missing or empty: ${allMissing.join(', ')}`);
   }
 
-  validateSuperpowerEvidence(workbench, [SUPERPOWER_SKILLS.writingPlans], 'check-workbench');
+  validateRequirementAlignment(workbench);
   console.log('Workbench check passed.');
 }
 
@@ -187,12 +201,6 @@ function approveGate1(workbench, options) {
   nextState.phase = 'gate1_approved';
   nextState.gates.gate1 = 'approved';
   nextState.gates.gate2 = 'pending';
-  nextState.execution = {
-    mode: options.mode || 'main-serial',
-    worktree: readBoolean(options.worktree, false),
-    subagents: readBoolean(options.subagents, false),
-    checkpoint: readBoolean(options.checkpoint, false)
-  };
   nextState.humanConfirmations = {
     ...(nextState.humanConfirmations || {}),
     gate1: {
@@ -205,8 +213,56 @@ function approveGate1(workbench, options) {
   saveState(workbench, nextState);
   writeGateDecision(workbench, 1, nextState, options);
   writeProjection(workbench, nextState);
-  appendEvent(workbench, 'approve-gate1', nextState.execution);
-  console.log('Gate 1 approved.');
+  appendEvent(workbench, 'approve-gate1', { confirmedBy });
+  console.log('Gate 1 requirement-alignment approved.');
+}
+
+function approveGate2(workbench, options) {
+  const state = requireState(workbench);
+  if (state.gates.gate1 !== 'approved') {
+    throw new Error('Cannot approve Gate 2 before Gate 1 requirement alignment is approved.');
+  }
+  if (state.gates.gate2 === 'approved') {
+    console.log('Gate 2 is already approved.');
+    return;
+  }
+  const confirmedBy = String(options.confirmedBy || options.by || '').trim();
+  const confirmationText = String(options.confirmation || '').trim();
+  if (confirmedBy !== 'user') {
+    throw new Error('Gate 2 approval requires --confirmed-by user after explicit user confirmation.');
+  }
+  if (confirmationText.length < 6) {
+    throw new Error('Gate 2 approval requires --confirmation "<用户确认原话或摘要>".');
+  }
+
+  checkWorkbench(workbench);
+  validatePlanWorkbench(workbench);
+  validateSuperpowerEvidence(workbench, [SUPERPOWER_SKILLS.writingPlans], 'approve-gate2');
+
+  const nextState = requireState(workbench);
+  nextState.phase = 'gate2_approved';
+  nextState.gates.gate2 = 'approved';
+  nextState.gates.gate3 = 'pending';
+  nextState.execution = {
+    mode: options.mode || 'main-serial',
+    worktree: readBoolean(options.worktree, false),
+    subagents: readBoolean(options.subagents, false),
+    checkpoint: readBoolean(options.checkpoint, false)
+  };
+  nextState.humanConfirmations = {
+    ...(nextState.humanConfirmations || {}),
+    gate2: {
+      confirmedBy,
+      confirmationText,
+      confirmedAt: now()
+    }
+  };
+  nextState.updatedAt = now();
+  saveState(workbench, nextState);
+  writeGateDecision(workbench, 2, nextState, options);
+  writeProjection(workbench, nextState);
+  appendEvent(workbench, 'approve-gate2', nextState.execution);
+  console.log('Gate 2 plan approved.');
 }
 
 function checkAction(workbench, options) {
@@ -215,7 +271,7 @@ function checkAction(workbench, options) {
   if (!action) throw new Error('Missing --action.');
 
   if (action === 'code') {
-    requireGate(state, 'gate1');
+    requireGate(state, 'gate2');
     if (options.ui === 'true' && !options.schemaExtract) {
       throw new Error('UI coding requires --schema-extract.');
     }
@@ -237,7 +293,7 @@ function checkAction(workbench, options) {
   }
 
   if (['commit', 'merge', 'push', 'cleanup'].includes(action)) {
-    requireGate(state, 'gate3');
+    requireGate(state, 'gate4');
     validateSuperpowerEvidence(
       workbench,
       [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
@@ -252,7 +308,7 @@ function checkAction(workbench, options) {
 
 function verify(workbench, options) {
   const state = requireState(workbench);
-  requireGate(state, 'gate1');
+  requireGate(state, 'gate2');
 
   const reviewPack = options.reviewPack || 'reviews/review-packs.md';
   const validation = options.validation || 'reports/validation.md';
@@ -305,20 +361,85 @@ function verify(workbench, options) {
   console.log('Verify passed.');
 }
 
-function requestGate2(workbench, options) {
+function requestGate3(workbench, options) {
   const state = requireState(workbench);
-  requireGate(state, 'gate1');
+  requireGate(state, 'gate2');
   verify(workbench, options);
 
   const nextState = requireState(workbench);
-  nextState.phase = 'gate2_pending';
-  nextState.gates.gate2 = 'review_requested';
+  nextState.phase = 'gate3_pending';
+  nextState.gates.gate3 = 'review_requested';
   nextState.updatedAt = now();
   saveState(workbench, nextState);
-  writeGateDecision(workbench, 2, nextState, options);
+  writeGateDecision(workbench, 3, nextState, options);
   writeProjection(workbench, nextState);
-  appendEvent(workbench, 'request-gate2', {});
-  console.log('Gate 2 requested.');
+  appendEvent(workbench, 'request-gate3', {});
+  console.log('Gate 3 requested.');
+}
+
+function approveGate3(workbench, options) {
+  const state = requireState(workbench);
+  if (state.gates.gate3 !== 'review_requested') {
+    throw new Error('Gate 3 is not pending. Run request-gate3 first.');
+  }
+  const reviewAccepted = readBoolean(options.review, true);
+  const validationAccepted = readBoolean(options.validation, true);
+  if (!reviewAccepted || !validationAccepted) {
+    throw new Error('Gate 3 approval requires review and validation to be accepted.');
+  }
+  state.phase = 'gate3_approved';
+  state.gates.gate3 = 'approved';
+  state.gates.gate4 = 'pending';
+  state.updatedAt = now();
+  saveState(workbench, state);
+  writeGateDecision(workbench, 3, state, options);
+  writeProjection(workbench, state);
+  appendEvent(workbench, 'approve-gate3', {});
+  console.log('Gate 3 review approved.');
+}
+
+function requestGate4(workbench, options) {
+  const state = requireState(workbench);
+  requireGate(state, 'gate3');
+  validateSuperpowerEvidence(
+    workbench,
+    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
+    'request-gate4'
+  );
+  state.phase = 'gate4_pending';
+  state.gates.gate4 = 'final_requested';
+  state.updatedAt = now();
+  saveState(workbench, state);
+  writeGateDecision(workbench, 4, state, options);
+  writeProjection(workbench, state);
+  appendEvent(workbench, 'request-gate4', {});
+  console.log('Gate 4 requested.');
+}
+
+function approveGate4(workbench, options) {
+  const state = requireState(workbench);
+  if (state.gates.gate4 !== 'final_requested') {
+    throw new Error('Gate 4 is not pending. Run request-gate4 first.');
+  }
+  validateSuperpowerEvidence(
+    workbench,
+    [SUPERPOWER_SKILLS.verificationBeforeCompletion, SUPERPOWER_SKILLS.finishingDevelopmentBranch],
+    'approve-gate4'
+  );
+  state.phase = 'gate4_approved';
+  state.gates.gate4 = 'approved';
+  state.finalActions = {
+    merge: readBoolean(options.merge, false),
+    commit: readBoolean(options.commit, false),
+    push: readBoolean(options.push, false),
+    cleanup: readBoolean(options.cleanup, false)
+  };
+  state.updatedAt = now();
+  saveState(workbench, state);
+  writeGateDecision(workbench, 4, state, options);
+  writeProjection(workbench, state);
+  appendEvent(workbench, 'approve-gate4', state.finalActions);
+  console.log('Gate 4 final-action approved.');
 }
 
 function superpowerEvidenceText(workbench) {
@@ -373,13 +494,16 @@ function hasReviewAgentWork(workbench) {
 
 function recommendNext(state) {
   if (state.gates.gate1 !== 'approved') {
-    return 'Next: complete workbench docs, run check-workbench, then approve-gate1.';
+    return 'Next: complete requirement alignment, run check-workbench, then approve-gate1.';
   }
-  if (state.gates.gate2 !== 'review_requested') {
-    return 'Next: execute approved tasks, fan-in review packs and validation, then run verify/request-gate2.';
+  if (state.gates.gate2 !== 'approved') {
+    return 'Next: complete task plan docs and approve-gate2 with execution mode.';
   }
   if (state.gates.gate3 !== 'approved') {
-    return 'Next: human reviews Gate 2 artifacts before any final action.';
+    return 'Next: execute approved tasks, fan-in review packs and validation, then run verify/request-gate3.';
+  }
+  if (state.gates.gate4 !== 'approved') {
+    return 'Next: human reviews Gate 3 artifacts, then request/approve Gate 4 final actions.';
   }
   return 'Next: final actions may run only after explicit checks.';
 }
@@ -388,15 +512,20 @@ function requireGate(state, gate) {
   if (state.gates[gate] !== 'approved') {
     throw new Error(`${gate} is not approved.`);
   }
-  if (gate === 'gate1' && !hasGate1HumanConfirmation(state)) {
+  if (gate === 'gate1' && !hasGateHumanConfirmation(state, 'gate1')) {
     throw new Error(
       'Gate 1 is approved but missing explicit user confirmation. Re-run approve-gate1 with --confirmed-by user --confirmation "<用户确认原话或摘要>".'
     );
   }
+  if (gate === 'gate2' && !hasGateHumanConfirmation(state, 'gate2')) {
+    throw new Error(
+      'Gate 2 is approved but missing explicit user confirmation. Re-run approve-gate2 with --confirmed-by user --confirmation "<用户确认原话或摘要>".'
+    );
+  }
 }
 
-function hasGate1HumanConfirmation(state) {
-  const confirmation = state.humanConfirmations && state.humanConfirmations.gate1;
+function hasGateHumanConfirmation(state, gate) {
+  const confirmation = state.humanConfirmations && state.humanConfirmations[gate];
   return (
     confirmation &&
     confirmation.confirmedBy === 'user' &&
@@ -518,10 +647,7 @@ function hasNonEmptyFile(file) {
 
 function requiredWorkbenchFiles(workbench) {
   const files = [
-    'plans/task-plan.md',
-    'plans/progress.md',
-    'reviews/review-packs.md',
-    'reports/validation.md'
+    'specs/requirement-alignment.md'
   ];
 
   if (hasApiMaterial(workbench)) files.push('specs/api-spec.md');
@@ -536,6 +662,31 @@ function requiredWorkbenchFiles(workbench) {
   }
 
   return files;
+}
+
+function validateRequirementAlignment(workbench) {
+  const file = path.join(workbench, 'specs', 'requirement-alignment.md');
+  const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const confirmed = /(状态|结论|确认).{0,20}(已确认|确认通过|approved|accepted)/i.test(content);
+  const confirmedByUser = /(确认人|confirmedBy|confirmed by|用户|user)/i.test(content);
+  const hasBlockingOpen = /(阻塞|blocking|blocker).{0,40}(待确认|未确认|open|pending|TODO)/i.test(content);
+  const explicitPending = /(状态|结论|确认).{0,20}(待确认|未确认|pending|not[- ]?approved)/i.test(content);
+  if (!confirmed || !confirmedByUser || hasBlockingOpen || explicitPending) {
+    throw new Error('Requirement alignment is not confirmed. Update specs/requirement-alignment.md with user-confirmed understanding, scope, rules, examples, and confirmation summary.');
+  }
+}
+
+function validatePlanWorkbench(workbench) {
+  const required = [
+    'plans/task-plan.md',
+    'plans/progress.md',
+    'reviews/review-packs.md',
+    'reports/validation.md'
+  ];
+  const missing = required.filter(file => !hasNonEmptyFile(path.join(workbench, file)));
+  if (missing.length) {
+    throw new Error(`Gate 2 plan check failed. Missing or empty: ${missing.join(', ')}`);
+  }
 }
 
 function requiredWorkbenchAlternatives(workbench) {
@@ -637,9 +788,11 @@ function printHelp() {
   node scripts/supermaestro.js next <workbench>
   node scripts/supermaestro.js resume <workbench>
   node scripts/supermaestro.js check-workbench <workbench>
-  node scripts/supermaestro.js approve-gate1 <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
+  node scripts/supermaestro.js approve-gate1 <workbench> --confirmed-by user --confirmation <text>
+  node scripts/supermaestro.js approve-gate2 <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
   node scripts/supermaestro.js check <workbench> --action code
   node scripts/supermaestro.js verify <workbench> --strict true
-  node scripts/supermaestro.js request-gate2 <workbench>
+  node scripts/supermaestro.js request-gate3 <workbench>
+  node scripts/supermaestro.js request-gate4 <workbench>
 `);
 }

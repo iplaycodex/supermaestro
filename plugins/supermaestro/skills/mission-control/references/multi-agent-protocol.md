@@ -1,6 +1,6 @@
 # 多 Agent 协作协议
 
-只有 Gate 1 `allowSubagents=true` 且确实派发真实外部 agent/thread 时读取并执行本协议。不开真实子 agent 时，不生成或维护本协议相关 agent 文档。
+只有 Gate 2 `allowSubagents=true` 且确实派发真实外部 agent/thread 时读取并执行本协议。不开真实子 agent 时，不生成或维护本协议相关 agent 文档。
 
 ## 角色
 
@@ -19,7 +19,7 @@ Mission Control 负责主控流程，Superpowers 负责 worker 执行纪律：
 - 编码 worker 必须按任务卡读取并遵守 `superpowers:test-driven-development`；只有任务卡标记 `TDD适用性: not-applicable` 或 `deferred` 时才可跳过，并且必须写明原因。
 - worker 遇到 bug、测试失败、构建失败、联调异常或行为 review finding 时，必须使用 `superpowers:systematic-debugging` 先找根因，再做最小修复。
 - review agent 使用 `superpowers:requesting-code-review` 的输入结构；changes-requested 修复使用 `superpowers:receiving-code-review` 的反馈处理纪律。
-- Gate 2/Gate 3 和任何完成声明前使用 `superpowers:verification-before-completion`；Gate 3 最终动作使用 `superpowers:finishing-a-development-branch` 的收尾顺序。
+- Gate 3/Gate 4 和任何完成声明前使用 `superpowers:verification-before-completion`；Gate 4 最终动作使用 `superpowers:finishing-a-development-branch` 的收尾顺序。
 - `superpowers:executing-plans` 只作为不开 subagent、跨会话或串行执行已有计划时的 fallback。
 
 ## Foundation-first

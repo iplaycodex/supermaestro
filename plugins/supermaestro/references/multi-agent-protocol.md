@@ -10,7 +10,7 @@ Execution layering:
 - Coding workers must follow `superpowers:test-driven-development` when the task touches behavior code, unless the task card explicitly marks TDD as `not-applicable` or `deferred`.
 - Workers must follow `superpowers:systematic-debugging` before fixing bugs, test failures, build failures, integration failures, or behavior review findings.
 - Review checkpoints use `superpowers:requesting-code-review`; changes-requested handling uses `superpowers:receiving-code-review`.
-- Gate 2/Gate 3 completion claims use `superpowers:verification-before-completion`; Gate 3 final action handling uses `superpowers:finishing-a-development-branch`.
+- Gate 3/Gate 4 completion claims use `superpowers:verification-before-completion`; Gate 4 final action handling uses `superpowers:finishing-a-development-branch`.
 
 Flow:
 

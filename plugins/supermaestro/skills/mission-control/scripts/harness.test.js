@@ -30,6 +30,68 @@ let state = JSON.parse(result.stdout)
 assert.match(state.nextAction.summary, /补齐工作台/)
 
 write(path.join(wb, 'context.md'), '# 上下文\n\n已整理。\n')
+write(path.join(wb, 'specs/requirement-alignment.md'), [
+  '# 需求对齐',
+  '',
+  '## 用户确认',
+  '',
+  '状态：已确认',
+  '确认人：user',
+  '确认摘要：测试用户确认 AI 对需求理解一致',
+  '',
+].join('\n'))
+
+result = run(['check-workbench', wb], root)
+assert.strictEqual(result.status, 0, result.stdout + result.stderr)
+
+const alignmentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-harness-alignment-'))
+const alignmentWb = path.join(alignmentRoot, 'workbench')
+result = run(['init', alignmentWb, '--name', '需求对齐测试'], alignmentRoot)
+assert.strictEqual(result.status, 0, result.stderr)
+write(path.join(alignmentWb, 'context.md'), '# 上下文\n\n已整理。\n')
+result = run(['check-workbench', alignmentWb], alignmentRoot)
+assert.notStrictEqual(result.status, 0, 'Gate 1 should require requirement alignment document')
+assert.match(result.stderr, /requirement-alignment\.md/)
+
+write(path.join(alignmentWb, 'specs/requirement-alignment.md'), [
+  '# 需求对齐',
+  '',
+  '## 用户确认',
+  '',
+  '状态：待确认',
+  '',
+].join('\n'))
+result = run(['check-workbench', alignmentWb], alignmentRoot)
+assert.notStrictEqual(result.status, 0, 'Gate 1 should require confirmed requirement alignment')
+assert.match(result.stderr, /需求对齐/)
+
+write(path.join(alignmentWb, 'specs/requirement-alignment.md'), [
+  '# 需求对齐',
+  '',
+  '## 用户确认',
+  '',
+  '状态：已确认',
+  '确认人：user',
+  '确认摘要：测试用户确认需求理解一致',
+  '',
+].join('\n'))
+result = run(['check-workbench', alignmentWb], alignmentRoot)
+assert.strictEqual(result.status, 0, result.stdout + result.stderr)
+
+result = run([
+  'approve-gate1',
+  wb,
+  '--confirmed-by',
+  'user',
+  '--confirmation',
+  '测试用户确认需求理解一致',
+], root)
+assert.strictEqual(result.status, 0, result.stdout + result.stderr)
+
+result = run(['check', wb, '--action', 'code', '--non-ui', 'true', '--reason', '测试'], root)
+assert.notStrictEqual(result.status, 0, 'Gate 2 plan approval should be required before coding')
+assert.match(result.stderr, /Gate 2/)
+
 write(path.join(wb, 'plans/task-plan.md'), '# 任务计划\n\n### RP-P1-demo\n')
 write(path.join(wb, 'plans/progress.md'), '# 进度同步\n\n## Review Agent\n\n')
 write(path.join(wb, 'reviews/review-packs.md'), '# 审查包\n\n### RP-P1-demo\n\nDiff: `git diff`\n')
@@ -42,8 +104,17 @@ write(path.join(wb, 'reports/validation.md'), [
   '',
 ].join('\n'))
 
-result = run(['check-workbench', wb], root)
-assert.notStrictEqual(result.status, 0, 'Gate 1 workbench should require writing-plans evidence')
+result = run([
+  'approve-gate2',
+  wb,
+  '--mode',
+  'main-serial',
+  '--confirmed-by',
+  'user',
+  '--confirmation',
+  '测试用户确认继续',
+], root)
+assert.notStrictEqual(result.status, 0, 'Gate 2 plan approval should require writing-plans evidence')
 assert.match(result.stderr, /superpowers:writing-plans/)
 
 write(path.join(wb, 'reports/validation.md'), [
@@ -53,11 +124,20 @@ write(path.join(wb, 'reports/validation.md'), [
   '',
   '| Skill | 场景 | 结果 | 证据 |',
   '| --- | --- | --- | --- |',
-  '| superpowers:writing-plans | Gate 1 任务计划 | pending / 已读取并吸收 |  |',
+  '| superpowers:writing-plans | Gate 2 任务计划 | pending / 已读取并吸收 |  |',
   '',
 ].join('\n'))
-result = run(['check-workbench', wb], root)
-assert.notStrictEqual(result.status, 0, 'placeholder Superpowers evidence should not pass')
+result = run([
+  'approve-gate2',
+  wb,
+  '--mode',
+  'main-serial',
+  '--confirmed-by',
+  'user',
+  '--confirmation',
+  '测试用户确认继续',
+], root)
+assert.notStrictEqual(result.status, 0, 'placeholder Superpowers evidence should not pass Gate 2')
 assert.match(result.stderr, /superpowers:writing-plans/)
 
 write(path.join(wb, 'reports/validation.md'), [
@@ -67,7 +147,7 @@ write(path.join(wb, 'reports/validation.md'), [
   '',
   '| Skill | 场景 | 结果 | 证据 |',
   '| --- | --- | --- | --- |',
-  '| superpowers:writing-plans | Gate 1 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
+  '| superpowers:writing-plans | Gate 2 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
   '',
   '| 验证项 | 类型 | 状态 | 证据/备注 |',
   '| --- | --- | --- | --- |',
@@ -76,7 +156,7 @@ write(path.join(wb, 'reports/validation.md'), [
 ].join('\n'))
 
 result = run([
-  'approve-gate1',
+  'approve-gate2',
   wb,
   '--mode',
   'main-serial',
@@ -94,9 +174,9 @@ write(path.join(wb, 'reports/validation.md'), [
   '',
   '| Skill | 场景 | 结果 | 证据 |',
   '| --- | --- | --- | --- |',
-  '| superpowers:writing-plans | Gate 1 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
+  '| superpowers:writing-plans | Gate 2 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
   '| superpowers:test-driven-development | 编码任务纪律 | 已读取并吸收 | F1a 标记 required，记录 RED/GREEN 位置 |',
-  '| superpowers:executing-plans | 主控串行执行 | 已读取并吸收 | Gate 1 未启用 subagents，使用串行执行计划 |',
+  '| superpowers:executing-plans | 主控串行执行 | 已读取并吸收 | Gate 2 未启用 subagents，使用串行执行计划 |',
   '| superpowers:verification-before-completion | Gate 2 前验证 | 已读取并执行 | 本轮验证命令和 exit code 已记录 |',
   '',
   '| 验证项 | 类型 | 状态 | 证据/备注 |',
@@ -110,15 +190,15 @@ assert.strictEqual(result.status, 0, result.stdout + result.stderr)
 assert.match(result.stdout, /PASS mission-control verify/)
 
 state = JSON.parse(fs.readFileSync(path.join(wb, 'mission.state.json'), 'utf8'))
-assert.match(state.nextAction.command, /request-gate2/)
+assert.match(state.nextAction.command, /request-gate3/)
 
-result = run(['request-gate2', wb], root)
+result = run(['request-gate3', wb], root)
 assert.strictEqual(result.status, 0, result.stdout + result.stderr)
 
 result = run(['resume', wb, '--json'], root)
 assert.strictEqual(result.status, 0, result.stdout + result.stderr)
 state = JSON.parse(result.stdout)
-assert.match(state.nextAction.command, /approve-gate2/)
+assert.match(state.nextAction.command, /approve-gate3/)
 
 const matrixRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-harness-matrix-'))
 const matrixWb = path.join(matrixRoot, '需求A', 'workbench')
@@ -128,6 +208,7 @@ assert.strictEqual(result.status, 0, result.stderr)
 write(path.join(matrixRoot, '需求A', 'source', 'api', '接口文档.md'), '# 接口文档\n')
 write(path.join(matrixRoot, '需求A', 'source', 'ui', 'manifest.json'), '{"boards":[]}\n')
 write(path.join(matrixWb, 'context.md'), '# 上下文\n\n已整理。\n')
+write(path.join(matrixWb, 'specs', 'requirement-alignment.md'), '# 需求对齐\n\n状态：已确认\n确认人：user\n确认摘要：用户确认需求理解一致\n')
 write(path.join(matrixWb, 'specs', 'api-spec.md'), '# API 规格\n\n已整理。\n')
 write(path.join(matrixWb, 'specs', 'ui-material-index.md'), '# UI 物料索引\n\n已整理。\n')
 write(path.join(matrixWb, 'specs', 'ui-schema-extract.md'), '# UI Schema 提取\n\n已整理。\n')
@@ -141,7 +222,7 @@ write(path.join(matrixWb, 'reports', 'validation.md'), [
   '',
   '| Skill | 场景 | 结果 | 证据 |',
   '| --- | --- | --- | --- |',
-  '| superpowers:writing-plans | Gate 1 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
+  '| superpowers:writing-plans | Gate 2 任务计划 | 已读取并吸收 | task-plan.md 按文件、步骤、测试、命令、预期结果拆分 |',
   '',
   '| 验证项 | 类型 | 状态 | 证据/备注 |',
   '| --- | --- | --- | --- |',

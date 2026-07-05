@@ -68,7 +68,7 @@
 - requesting-code-review：Review Agent Checkpoint yes / no
 - receiving-code-review：changes-requested 时 required
 - verification-before-completion：Gate 2 / Gate 3 / completion claims required
-- finishing-a-development-branch：Gate 3 final action required
+- finishing-a-development-branch：Gate 4 final action required
 - Contract changes：yes / no；仅真实契约变更才生成 `contract-changes/`
 - Integration：yes / no；仅独立集成分支/计划才生成 `integration/`
 - 不生成的模块和原因：
@@ -97,7 +97,7 @@
 - Review Agent Checkpoint：每个 worker 完成后新开只读 review agent；如关闭，说明风险
 - Superpowers 执行增强：writing-plans 颗粒度、SDD 或 executing-plans fallback、TDD 覆盖范围和跳过条件
 - 调试与 review 纪律：失败时根因调查；review agent 输入结构；review findings 核实与处理方式
-- 完成与收尾纪律：Gate 2/Gate 3 前新鲜验证证据；Gate 3 final action 菜单、环境判断和清理边界
+- 完成与收尾纪律：Gate 3/Gate 4 前新鲜验证证据；Gate 4 final action 菜单、环境判断和清理边界
 - 启用模块：
 - 不生成模块：
 - 验证策略：
