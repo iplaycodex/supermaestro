@@ -55,6 +55,8 @@ workbench/reviews/review-packs.md
 workbench/reports/validation.md
 ```
 
+`workbench/specs/` 顶层只放人类主文档。机器可读 contract JSON 放在 `workbench/specs/machine/`，包括 `api-contract.json`、`ui-contract.json` 和 `review-contract.json`。迁移期 CLI 仍 fallback 读取旧顶层 JSON。
+
 `reports/validation.md`, `plans/task-plan.md`, `plans/progress.md`, and `reviews/review-packs.md` remain legacy fallback evidence sources during migration. New machine evidence should be written to `reports/evidence.jsonl` with `supermaestro evidence`.
 
 ## Gate Rules
@@ -75,6 +77,10 @@ workbench/reports/validation.md
 - API contract when API material exists or `api=true`.
 - Behavior contract in `strict` mode or `behavior=true`.
 - Review contract in `standard` / `strict` or `review=true`.
+
+Strict UI coding uses `specs/ui-schema-extract.md` as the primary UI schema node extraction and Schema-to-implementation mapping document. Legacy `specs/ui-schema-map.md` is accepted only as fallback for old workbenches.
+
+Review Contract lives in `reviews/review-packs.md` as the primary human review entrypoint. Legacy `specs/review-contract.md` is accepted only as fallback for old workbenches. `specs/machine/review-contract.json` may remain as machine-readable metadata.
 
 In `strict` mode, `approve-plan` runs contract validation as a hard gate. In `standard` mode, `check-contracts` is available for manual review and defaults to warnings unless `--strict true` is passed. `lite` skips contract validation by default.
 

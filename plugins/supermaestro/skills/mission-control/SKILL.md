@@ -33,6 +33,7 @@ workbench/events.jsonl            # append-only 事件日志
 workbench/mission.state.json      # resume/next 投影
 workbench/gates/*.json            # Gate 决策
 workbench/reports/evidence.jsonl  # 机器 evidence 主源
+workbench/specs/machine/*.json    # 机器 contract JSON
 ```
 
 Markdown 是人类投影和 review 材料，不是机器证据主源：
@@ -45,6 +46,8 @@ workbench/plans/progress.md
 workbench/reviews/review-packs.md
 workbench/reports/validation.md
 ```
+
+`specs/` 顶层放人类主文档，`specs/machine/` 放机器 contract JSON。`specs/ui-schema-extract.md` 同时是 UI schema 节点提取和 Schema 到实现映射主文档；`reviews/review-packs.md` 是 Review Contract 主入口。
 
 迁移期 CLI 仍兼容 `reports/validation.md`、`plans/task-plan.md`、`plans/progress.md`、`reviews/review-packs.md` 中的旧式 Superpowers 文本证据。新流程优先使用：
 
@@ -123,7 +126,7 @@ approve-gate4 -> approve-final
 
 ```bash
 node <plugin-root>/scripts/supermaestro.js check <workbench> --action code --non-ui true --reason "只改接口或非视觉逻辑"
-node <plugin-root>/scripts/supermaestro.js check <workbench> --action code --ui true --schema-extract specs/ui-schema-extract.md --schema-map specs/ui-schema-map.md
+node <plugin-root>/scripts/supermaestro.js check <workbench> --action code --ui true --schema-extract specs/ui-schema-extract.md
 node <plugin-root>/scripts/supermaestro.js check <workbench> --action dispatch-subagent
 node <plugin-root>/scripts/supermaestro.js verify <workbench> --strict true
 node <plugin-root>/scripts/supermaestro.js check <workbench> --action commit
@@ -177,12 +180,12 @@ CLI enforcement:
 
 `strict` mode 的 hard rules:
 
-- Plan Gate 前，UI material 需要 `ui-contract.md/json`、`ui-material-index.md`、`ui-schema-extract.md`、`ui-schema-map.md`。
-- Plan Gate 前，API material 需要 `api-contract.md/json`。
+- Plan Gate 前，UI material 需要 `specs/ui-contract.md`、`specs/machine/ui-contract.json`、`specs/ui-material-index.md`、`specs/ui-schema-extract.md`，并要求 `ui-schema-extract.md` 内含标准 Schema 到实现映射表；旧工作台可 fallback 到 `specs/ui-contract.json` 与 `specs/ui-schema-map.md`。
+- Plan Gate 前，API material 需要 `specs/api-contract.md` 与 `specs/machine/api-contract.json`；旧工作台可 fallback 到 `specs/api-contract.json`。
 - 同时存在 API + UI 时，需要 `page-contract-matrix.md`。
-- `behavior=true` 或 `strict` mode 需要 `behavior-contract.md`。
-- `standard` / `strict` 或 `review=true` 需要 review contract 或 review pack。
-- UI coding 前需要 `schema-extract`；`strict` mode 还需要 `schema-map`。
+- `behavior=true` 或 `strict` mode 需要 `behavior-contract.md`；无复杂行为时允许用明确结论收敛，例如“结论：无状态机、权限、缓存、并发行为变更。”
+- `standard` / `strict` 或 `review=true` 需要 `reviews/review-packs.md` 内含 Review Contract 表；旧工作台可 fallback 到 `specs/review-contract.md`。机器 JSON 可放 `specs/machine/review-contract.json`。
+- UI coding 前需要 `schema-extract`；`strict` mode 要求 `schema-extract` 内含标准映射表，旧工作台可 fallback 到 `schema-map`。
 - `strict` mode 下 `superpowers:test-driven-development` 需要真实 used evidence，不接受仅 skipped-with-reason。
 - Review Gate 前需要可审查 artifact；Plan 阶段可以 pending。
 
@@ -204,7 +207,7 @@ node <plugin-root>/scripts/supermaestro.js evidence <workbench> --type skill.use
 - 有 `source/ui/manifest.json` 时，建议先运行 `inspect-ui.js <workbench> --write-index true` 生成 UI 物料索引。
 - 有 `source/ui/schemas/*.json` 时，建议按 Sketch Data 提取节点级布局、文本、颜色、资源和状态差异，并维护 Schema 到实现映射表。
 - 强视觉节点建议优先绑定设计资源或 OSS 资源；资源缺失时记录 blocked，不建议用 CSS 近似替代。
-- 有 API 物料时，建议在 `api-contract.md/json` 中记录接口、字段、loading/empty/error、mock 和 no-change 结论。
+- 有 API 物料时，建议在 `api-contract.md` 与 `specs/machine/api-contract.json` 中记录接口、字段、loading/empty/error、mock 和 no-change 结论。
 - 有状态机、权限、跳转、缓存、并发或异常分支时，建议维护 `behavior-contract.md`。
 
 ## Review 与交接建议

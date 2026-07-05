@@ -293,6 +293,7 @@ function detectArtifactTriggers(workbench, options, mode) {
     worktree: readBoolean(options.worktree, false),
     subagents: readBoolean(options.subagents, false),
     reviewAgent: readBoolean(options.reviewAgent || options.reviewAgentCheckpoint, false),
+    brainstorming: readBoolean(options.brainstorming, false),
     contractChanges: readBoolean(options.contractChanges, false),
     integration: readBoolean(options.integration, false)
   };
@@ -317,25 +318,21 @@ function requiredArtifactsFor(mode, triggers) {
     artifact('reviews/review-packs.md', reviewPacksTemplate)
   );
 
-  if (triggers.review) {
-    artifacts.push(artifact('specs/review-contract.md', reviewContractTemplate));
-    artifacts.push(artifact('specs/review-contract.json', reviewContractJsonTemplate));
-  }
+  if (triggers.review) artifacts.push(artifact('specs/machine/review-contract.json', reviewContractJsonTemplate));
 
   if (triggers.api) {
     artifacts.push(artifact('specs/api-contract.md', apiContractTemplate));
-    artifacts.push(artifact('specs/api-contract.json', apiContractJsonTemplate));
+    artifacts.push(artifact('specs/machine/api-contract.json', apiContractJsonTemplate));
   }
 
   if (triggers.ui) {
     artifacts.push(artifact('specs/ui-contract.md', uiContractTemplate));
-    artifacts.push(artifact('specs/ui-contract.json', uiContractJsonTemplate));
+    artifacts.push(artifact('specs/machine/ui-contract.json', uiContractJsonTemplate));
     artifacts.push(artifact('specs/ui-material-index.md', uiMaterialIndexTemplate));
   }
 
   if (triggers.uiCoding) {
     artifacts.push(artifact('specs/ui-schema-extract.md', uiSchemaExtractTemplate));
-    artifacts.push(artifact('specs/ui-schema-map.md', uiSchemaMapTemplate));
   }
 
   if (triggers.api && triggers.ui) {
@@ -344,6 +341,9 @@ function requiredArtifactsFor(mode, triggers) {
 
   if (triggers.behavior) {
     artifacts.push(artifact('specs/behavior-contract.md', behaviorContractTemplate));
+  }
+  if (triggers.brainstorming) {
+    artifacts.push(artifact('specs/gate-1-brainstorming-questions.md', gate1BrainstormingQuestionsTemplate));
   }
 
   if (triggers.worktree) artifacts.push(artifact('worktrees/plan.md', worktreePlanTemplate));
@@ -469,16 +469,19 @@ function collectContractIssues(workbench, state, options = {}) {
 
   if (uiRequired) {
     requireNonEmpty(issues, workbench, 'specs/ui-contract.md', 'UI contract markdown is missing or empty.');
-    requireJson(issues, workbench, 'specs/ui-contract.json', 'UI contract JSON is missing or invalid.');
+    requireJsonAny(issues, workbench, ['specs/machine/ui-contract.json', 'specs/ui-contract.json'], 'UI contract JSON is missing or invalid.');
     requireNonEmpty(issues, workbench, 'specs/ui-material-index.md', 'UI material index is missing or empty.');
   }
 
   if (uiCodingRequired) {
-    requireNonEmpty(issues, workbench, 'specs/ui-schema-extract.md', 'UI schema extract is missing or empty.');
-    if (requireNonEmpty(issues, workbench, 'specs/ui-schema-map.md', 'UI schema map is missing or empty.')) {
-      const schemaMap = fs.readFileSync(path.join(workbench, 'specs/ui-schema-map.md'), 'utf8');
-      if (!hasSchemaMapHeaders(schemaMap)) {
-        issues.push({ level: 'FAIL', message: 'UI schema map must include Schema 节点/路径, 设计值, 代码文件/组件/样式选择器, 实现值, 偏差说明.' });
+    if (requireNonEmpty(issues, workbench, 'specs/ui-schema-extract.md', 'UI schema extract is missing or empty.')) {
+      const schemaExtract = fs.readFileSync(path.join(workbench, 'specs/ui-schema-extract.md'), 'utf8');
+      if (!hasSchemaMapHeaders(schemaExtract)) {
+        const legacyMap = resolveWorkbenchRef(workbench, 'specs/ui-schema-map.md');
+        const legacyOk = hasNonEmptyFile(legacyMap) && hasSchemaMapHeaders(fs.readFileSync(legacyMap, 'utf8'));
+        if (!legacyOk) {
+          issues.push({ level: 'FAIL', message: 'UI schema extract must include the standard Schema-to-implementation mapping table, or fallback specs/ui-schema-map.md must include it.' });
+        }
       }
     }
   }
@@ -487,7 +490,7 @@ function collectContractIssues(workbench, state, options = {}) {
     if (requireNonEmpty(issues, workbench, 'specs/api-contract.md', 'API contract markdown is missing or empty.')) {
       validateApiContractContent(issues, workbench);
     }
-    requireJson(issues, workbench, 'specs/api-contract.json', 'API contract JSON is missing or invalid.');
+    requireJsonAny(issues, workbench, ['specs/machine/api-contract.json', 'specs/api-contract.json'], 'API contract JSON is missing or invalid.');
   }
 
   if (apiRequired && uiRequired) {
@@ -526,6 +529,15 @@ function requireJson(issues, workbench, ref, message) {
   }
 }
 
+function requireJsonAny(issues, workbench, refs, message) {
+  const existing = refs.find(ref => hasNonEmptyFile(resolveWorkbenchRef(workbench, ref)));
+  if (!existing) {
+    issues.push({ level: 'FAIL', message });
+    return false;
+  }
+  return requireJson(issues, workbench, existing, message);
+}
+
 function validateApiContractContent(issues, workbench) {
   const content = fs.readFileSync(path.join(workbench, 'specs/api-contract.md'), 'utf8');
   const hasPlaceholder = /(pending|TODO|待补|待确认)/i.test(content);
@@ -562,14 +574,18 @@ function validateBehaviorContractContent(issues, workbench) {
 }
 
 function validateReviewContract(issues, workbench) {
-  const candidates = ['specs/review-contract.md', 'reviews/review-packs.md']
-    .map(ref => resolveWorkbenchRef(workbench, ref))
-    .filter(file => hasNonEmptyFile(file));
-  if (!candidates.length) {
+  const reviewPacks = resolveWorkbenchRef(workbench, 'reviews/review-packs.md');
+  const legacyReviewContract = resolveWorkbenchRef(workbench, 'specs/review-contract.md');
+  const candidate = hasNonEmptyFile(reviewPacks) && hasReviewContractHeaders(fs.readFileSync(reviewPacks, 'utf8'))
+    ? reviewPacks
+    : hasNonEmptyFile(legacyReviewContract)
+      ? legacyReviewContract
+      : '';
+  if (!candidate) {
     issues.push({ level: 'FAIL', message: 'Review contract or review packs are missing.' });
     return;
   }
-  const content = candidates.map(file => fs.readFileSync(file, 'utf8')).join('\n\n');
+  const content = fs.readFileSync(candidate, 'utf8');
   if (!/(git diff|diff command|patch|branch|PR|pull request|pending|待实现|待绑定)/i.test(content)) {
     issues.push({ level: 'FAIL', message: 'Review contract must point to diff/patch/branch/PR or explicitly mark pending state.' });
   }
@@ -664,9 +680,9 @@ function checkAction(workbench, options) {
       throw new Error('UI coding requires --schema-extract.');
     }
     if (options.ui === 'true') {
-      validateUiSchemaExtract(workbench, options.schemaExtract);
+      validateUiSchemaExtract(workbench, options.schemaExtract, options.schemaMap || 'specs/ui-schema-map.md');
       if (isStrict(state)) {
-        validateUiSchemaMap(workbench, options.schemaMap || 'specs/ui-schema-map.md');
+        validateUiSchemaMapping(workbench, options.schemaExtract, options.schemaMap || 'specs/ui-schema-map.md');
       }
     }
     validatePolicyEvidence(workbench, 'action.code', 'code');
@@ -1121,22 +1137,23 @@ function validateUiSchemaExtract(workbench, schemaExtract) {
     throw new Error(`UI schema extract is missing or empty: ${schemaExtract}`);
   }
   const content = fs.readFileSync(file, 'utf8');
-  if (!/\|\s*Schema 节点\/路径\s*\|\s*设计值\s*\|\s*代码文件\/组件\/样式选择器\s*\|\s*实现值\s*\|\s*偏差说明\s*\|/i.test(content)) {
-    throw new Error('UI schema extract must include the standard Schema-to-implementation mapping table.');
-  }
   if (!/资源映射|资源引用|图片图层|image-backed|oss|url\(|https?:\/\//i.test(content)) {
     throw new Error('UI schema extract must include resource mapping evidence for image-backed nodes.');
   }
 }
 
-function validateUiSchemaMap(workbench, schemaMapRef) {
-  const file = resolveWorkbenchRef(workbench, schemaMapRef);
-  if (!hasNonEmptyFile(file)) {
-    throw new Error(`UI schema map is missing or empty: ${schemaMapRef}`);
+function validateUiSchemaMapping(workbench, schemaExtractRef, schemaMapRef) {
+  const extractFile = resolveWorkbenchRef(workbench, schemaExtractRef);
+  const extractContent = hasNonEmptyFile(extractFile) ? fs.readFileSync(extractFile, 'utf8') : '';
+  if (hasSchemaMapHeaders(extractContent)) return;
+
+  const legacyMapFile = resolveWorkbenchRef(workbench, schemaMapRef);
+  if (!hasNonEmptyFile(legacyMapFile)) {
+    throw new Error(`UI schema extract must include the standard Schema-to-implementation mapping table. Legacy fallback is missing or empty: ${schemaMapRef}`);
   }
-  const content = fs.readFileSync(file, 'utf8');
+  const content = fs.readFileSync(legacyMapFile, 'utf8');
   if (!hasSchemaMapHeaders(content)) {
-    throw new Error('UI schema map must include Schema 节点/路径, 设计值, 代码文件/组件/样式选择器, 实现值, 偏差说明.');
+    throw new Error('UI schema extract or legacy UI schema map must include Schema 节点/路径, 设计值, 代码文件/组件/样式选择器, 实现值, 偏差说明.');
   }
 }
 
@@ -1147,6 +1164,18 @@ function hasSchemaMapHeaders(content) {
     /代码文件\/组件\/样式选择器|实现位置|selector|component/i,
     /实现值|implemented|actual/i,
     /偏差说明|deviation|notes/i
+  ].every(pattern => pattern.test(content));
+}
+
+function hasReviewContractHeaders(content) {
+  return [
+    /\bRP\b|Review\s*Pack|审查包/i,
+    /Scope|范围/i,
+    /Diff\s*command|git\s+diff|patch|branch|PR|pull request|差异/i,
+    /Files|文件/i,
+    /Validation|验证/i,
+    /Review\s*Focus|审查重点/i,
+    /Risk|风险/i
   ].every(pattern => pattern.test(content));
 }
 
@@ -1474,7 +1503,7 @@ function progressTemplate() {
 }
 
 function reviewPacksTemplate() {
-  return `# Review Packs\n\n## 规则\n\n每个 RP 必须指向真实 diff、patch、branch 或 PR，不能只列 Markdown 摘要。\n\n## RP1\n\n- Scope: pending\n- Diff command: pending\n- Files: pending\n- Validation: pending\n- Risk: pending\n`;
+  return `# Review Packs\n\n## 规则\n\n每个 RP 必须指向真实 diff、patch、branch 或 PR，不能只列 Markdown 摘要。Plan 阶段允许 pending，实现完成后必须绑定真实可审查 artifact。\n\n## Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | pending | pending | pending | pending | pending | pending |\n`;
 }
 
 function apiContractTemplate() {
@@ -1501,24 +1530,20 @@ function uiSchemaExtractTemplate() {
   return `# UI Schema Extract\n\n## 节点级提取\n\n- pending\n\n## Schema 到实现映射表\n\n| Schema 节点/路径 | 设计值 | 代码文件/组件/样式选择器 | 实现值 | 偏差说明 |\n| --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending |\n\n## 资源映射\n\n- 图片图层 / image-backed nodes: pending\n- OSS / URL: pending\n`;
 }
 
-function uiSchemaMapTemplate() {
-  return `# UI Schema Map\n\n| Schema 节点/路径 | 设计值 | 代码文件/组件/样式选择器 | 实现值 | 偏差说明 |\n| --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending |\n`;
-}
-
 function pageContractMatrixTemplate() {
   return `# Page Contract Matrix\n\n| 页面/模块 | PRD source_ref | UI 画板/schema | API/mock | 公共契约 | RP |\n| --- | --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending | pending |\n`;
 }
 
 function behaviorContractTemplate() {
-  return `# Behavior Contract\n\n## 状态机\n\n- pending\n\n## 交互规则\n\n- pending\n\n## 跳转 / 权限 / 缓存 / 并发\n\n- pending\n\n## 埋点\n\n- pending\n`;
-}
-
-function reviewContractTemplate() {
-  return `# Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | pending | pending | pending | pending | pending | pending |\n`;
+  return `# Behavior Contract\n\n结论：无状态机、权限、缓存、并发行为变更。\n\n## 复杂行为变更\n\n如存在状态机、权限、跳转、缓存、并发或异常分支，请把结论改为 blocked / partial / open，并在下表展开。\n\n| 行为 | 触发条件 | 预期结果 | 风险 | 验证 |\n| --- | --- | --- | --- | --- |\n`;
 }
 
 function reviewContractJsonTemplate() {
   return `${JSON.stringify({ version: 1, reviewPacks: [] }, null, 2)}\n`;
+}
+
+function gate1BrainstormingQuestionsTemplate() {
+  return `# Gate 1 Brainstorming Questions\n\n> 仅在明确启用 \`--brainstorming true\` 或确实存在待确认问题时生成。用户回答后必须 fan-in 回 \`context.md\`、\`specs/requirement-alignment.md\` 和 \`plans/progress.md\`。\n\n## Questions\n\n### Q1\n\n问题：pending\n\n你的答案：\n>\n\nFan-in targets: context.md / specs/requirement-alignment.md / plans/progress.md\n`;
 }
 
 function worktreePlanTemplate() {
@@ -1544,7 +1569,7 @@ function integrationPlanTemplate() {
 function printHelp() {
   console.log(`Usage:
   node scripts/supermaestro.js init <workbench> --name <name> --mode <lite|standard|strict>
-  node scripts/supermaestro.js scaffold <workbench> [--api true] [--ui true] [--worktree true] [--subagents true]
+  node scripts/supermaestro.js scaffold <workbench> [--api true] [--ui true] [--brainstorming true] [--worktree true] [--subagents true]
   node scripts/supermaestro.js status <workbench>
   node scripts/supermaestro.js next <workbench>
   node scripts/supermaestro.js resume <workbench>
@@ -1553,6 +1578,7 @@ function printHelp() {
   node scripts/supermaestro.js approve-scope <workbench> --confirmed-by user --confirmation <text>
   node scripts/supermaestro.js approve-plan <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
   node scripts/supermaestro.js evidence <workbench> --type skill.used --skill superpowers:writing-plans --phase plan --summary <text>
+  node scripts/supermaestro.js check <workbench> --action code --ui true --schema-extract specs/ui-schema-extract.md
   node scripts/supermaestro.js check <workbench> --action code --non-ui true --reason <reason>
   node scripts/supermaestro.js check <workbench> --action dispatch-subagent
   node scripts/supermaestro.js verify <workbench> --strict true

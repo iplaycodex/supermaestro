@@ -15,6 +15,7 @@ SuperMaestro 支持三种模式：
 ## 核心原则
 
 - `state.json + events.jsonl` 是机器状态。
+- `specs/` 顶层放人类主文档，`specs/machine/` 放机器 contract JSON。
 - Markdown 是人类审阅投影。
 - CLI enforcement 强于 prompt 规则。
 - Superpowers 默认作为 `superpowers` policy pack 启用。
@@ -56,11 +57,12 @@ approve-gate4 -> approve-final
 | all modes | `state.json`, `events.jsonl`, `reports/evidence.jsonl`, `reports/validation.md` |
 | `lite` | `brief.md` |
 | `standard` / `strict` | `context.md`, `specs/requirement-alignment.md`, `plans/task-plan.md`, `plans/progress.md`, `reviews/review-packs.md` |
-| API material | `specs/api-contract.md`, `specs/api-contract.json` |
-| UI manifest | `specs/ui-contract.md`, `specs/ui-contract.json`, `specs/ui-material-index.md` |
-| UI coding | `specs/ui-schema-extract.md`, `specs/ui-schema-map.md` |
+| API material | `specs/api-contract.md`, `specs/machine/api-contract.json` |
+| UI manifest | `specs/ui-contract.md`, `specs/machine/ui-contract.json`, `specs/ui-material-index.md` |
+| UI coding | `specs/ui-schema-extract.md`，同时承载 UI schema 节点提取和 Schema 到实现映射表 |
 | API + UI | `specs/page-contract-matrix.md` |
 | behavior risk | `specs/behavior-contract.md` |
+| review | `reviews/review-packs.md`，同时作为 Review Contract 主入口；机器 JSON 放 `specs/machine/review-contract.json` |
 | worktree / subagents / review agent | `worktrees/`, `agents/`, `reviews/code-review/` |
 
 ## Superpowers policy
@@ -77,7 +79,7 @@ workbench/reports/evidence.jsonl
 
 ## 收尾规则 / Strict mode
 
-`strict` mode 用于多页面、多画板、强 UI、接口契约和高风险任务。相比 `standard`，它会在 Plan Gate 前 hard check contracts，在 UI coding 前要求 `ui-schema-map`，在 Review Gate 前要求 review pack 指向真实 diff / patch / branch / PR。
+`strict` mode 用于多页面、多画板、强 UI、接口契约和高风险任务。相比 `standard`，它会在 Plan Gate 前 hard check contracts，在 UI coding 前要求 `ui-schema-extract.md` 内含标准 Schema 到实现映射表，在 Review Gate 前要求 review pack 指向真实 diff / patch / branch / PR。
 
 Final Gate 仍需要独立人工确认：
 
@@ -97,9 +99,11 @@ node plugins/supermaestro/scripts/supermaestro.js check-contracts documents/demo
 
 检查项包括：
 
-- UI: `ui-contract.md/json`、`ui-material-index.md`、`ui-schema-extract.md`、`ui-schema-map.md`
-- API: `api-contract.md/json`
+- UI: `ui-contract.md`、`specs/machine/ui-contract.json`、`ui-material-index.md`、`ui-schema-extract.md`
+- API: `api-contract.md`、`specs/machine/api-contract.json`
 - Behavior: `behavior-contract.md`
-- Review: `review-contract.md` 或 `reviews/review-packs.md`
+- Review: `reviews/review-packs.md`，兼容旧 `specs/review-contract.md`
 
 `strict` mode 下失败会阻塞；`standard` 默认以 warning 形式辅助人工 review。
+
+迁移期 `check-contracts` 仍 fallback 读取旧路径：`specs/api-contract.json`、`specs/ui-contract.json`、`specs/ui-schema-map.md`、`specs/review-contract.md`。

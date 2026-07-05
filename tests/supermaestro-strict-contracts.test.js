@@ -84,16 +84,28 @@ function seedPlan(workbench, { reviewReady = false } = {}) {
   write(
     path.join(workbench, 'reviews', 'review-packs.md'),
     reviewReady
-      ? '# Review Packs\n\nRP1\n- Diff command: git diff HEAD\n- Branch: codex/demo\n- Validation: npm test\n'
-      : '# Review Packs\n\n状态：pending，Plan 阶段等待实现后绑定 diff。\n'
+      ? '# Review Packs\n\n## Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | Demo | git diff HEAD | CLI | npm test | strict contracts | 无 |\n'
+      : '# Review Packs\n\n## Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | Demo | pending | pending | pending | strict contracts | Plan 阶段待实现后绑定 diff |\n'
   );
 }
 
-function seedContracts(workbench, { reviewReady = false } = {}) {
+function seedContracts(workbench) {
+  write(path.join(workbench, 'specs', 'ui-contract.md'), '# UI Contract\n\n画板：Demo\n资源映射：schema-only。\n');
+  write(path.join(workbench, 'specs', 'machine', 'ui-contract.json'), '{"version":1,"boards":[{"name":"Demo"}]}\n');
+  write(path.join(workbench, 'specs', 'ui-material-index.md'), '# UI 物料索引\n\nmanifest: source/ui/manifest.json\n');
+  write(path.join(workbench, 'specs', 'ui-schema-extract.md'), '# UI Schema Extract\n\n| Schema 节点/路径 | 设计值 | 代码文件/组件/样式选择器 | 实现值 | 偏差说明 |\n| --- | --- | --- | --- | --- |\n| /root | 375x812 | demo | 375x812 | 无 |\n\n资源映射：schema-only。\n');
+  write(path.join(workbench, 'specs', 'api-contract.md'), '# API Contract\n\n结论：无接口变更。\n');
+  write(path.join(workbench, 'specs', 'machine', 'api-contract.json'), '{"version":1,"apis":[],"conclusion":"无接口变更"}\n');
+  write(path.join(workbench, 'specs', 'page-contract-matrix.md'), '# Page Contract Matrix\n\n| 页面/模块 | UI | API | RP |\n| --- | --- | --- | --- |\n| Demo | Demo | 无接口变更 | RP1 |\n');
+  write(path.join(workbench, 'specs', 'behavior-contract.md'), '# Behavior Contract\n\n结论：无状态机、权限、缓存或并发行为变更。\n');
+  write(path.join(workbench, 'specs', 'machine', 'review-contract.json'), '{"version":1,"reviewPacks":[]}\n');
+}
+
+function seedLegacyContracts(workbench, { reviewReady = false } = {}) {
   write(path.join(workbench, 'specs', 'ui-contract.md'), '# UI Contract\n\n画板：Demo\n资源映射：schema-only。\n');
   write(path.join(workbench, 'specs', 'ui-contract.json'), '{"version":1,"boards":[{"name":"Demo"}]}\n');
   write(path.join(workbench, 'specs', 'ui-material-index.md'), '# UI 物料索引\n\nmanifest: source/ui/manifest.json\n');
-  write(path.join(workbench, 'specs', 'ui-schema-extract.md'), '# UI Schema Extract\n\n| Schema 节点/路径 | 设计值 | 代码文件/组件/样式选择器 | 实现值 | 偏差说明 |\n| --- | --- | --- | --- | --- |\n| /root | 375x812 | demo | 375x812 | 无 |\n\n资源映射：schema-only。\n');
+  write(path.join(workbench, 'specs', 'ui-schema-extract.md'), '# UI Schema Extract\n\n资源映射：schema-only。\n');
   write(path.join(workbench, 'specs', 'ui-schema-map.md'), '# UI Schema Map\n\n| Schema 节点/路径 | 设计值 | 代码文件/组件/样式选择器 | 实现值 | 偏差说明 |\n| --- | --- | --- | --- | --- |\n| /root | 375x812 | demo | 375x812 | 无 |\n');
   write(path.join(workbench, 'specs', 'api-contract.md'), '# API Contract\n\n结论：无接口变更。\n');
   write(path.join(workbench, 'specs', 'api-contract.json'), '{"version":1,"apis":[],"conclusion":"无接口变更"}\n');
@@ -129,7 +141,21 @@ try {
   write(path.join(tmp, 'strict', 'documents', 'demo', 'source', 'ui', 'manifest.json'), '{"boards":[{"name":"Demo"}]}\n');
   write(path.join(tmp, 'strict', 'documents', 'demo', 'source', 'api', 'openapi.json'), '{}\n');
   mustPass(['scaffold', strict, '--ui', 'true', '--api', 'true', '--ui-coding', 'true', '--behavior', 'true']);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'api-contract.json')), false);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'ui-contract.json')), false);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'review-contract.json')), false);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'machine', 'api-contract.json')), true);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'machine', 'ui-contract.json')), true);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'machine', 'review-contract.json')), true);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'ui-schema-map.md')), false);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'review-contract.md')), false);
+  assert.equal(fs.existsSync(path.join(strict, 'specs', 'gate-1-brainstorming-questions.md')), false);
   mustFail(['check-contracts', strict], /FAIL/);
+
+  const brainstormingWb = path.join(tmp, 'brainstorming', 'documents', 'demo', 'workbench');
+  mustPass(['init', brainstormingWb, '--name', 'Brainstorming Demo', '--mode', 'strict']);
+  mustPass(['scaffold', brainstormingWb, '--brainstorming', 'true']);
+  assert.equal(fs.existsSync(path.join(brainstormingWb, 'specs', 'gate-1-brainstorming-questions.md')), true);
 
   seedScope(strict);
   seedPlan(strict);
@@ -149,7 +175,7 @@ try {
   mustPass(['scaffold', finalWb, '--ui', 'true', '--api', 'true', '--ui-coding', 'true', '--behavior', 'true']);
   seedScope(finalWb);
   seedPlan(finalWb, { reviewReady: true });
-  seedContracts(finalWb, { reviewReady: true });
+  seedContracts(finalWb);
   approveScope(finalWb);
   addEvidence(finalWb, 'superpowers:writing-plans');
   approvePlan(finalWb);
@@ -163,6 +189,22 @@ try {
   mustPass(['request-gate4', finalWb]);
   mustFail(['approve-gate4', finalWb, '--merge', 'false'], /confirmed-by user/);
   mustPass(['approve-gate4', finalWb, '--confirmed-by', 'user', '--confirmation', '用户确认 final action', '--merge', 'false', '--commit', 'false', '--push', 'false', '--cleanup', 'false']);
+
+  const fallbackWb = path.join(tmp, 'fallback', 'documents', 'demo', 'workbench');
+  mustPass(['init', fallbackWb, '--name', 'Fallback Demo', '--mode', 'strict']);
+  write(path.join(tmp, 'fallback', 'documents', 'demo', 'source', 'ui', 'manifest.json'), '{"boards":[{"name":"Demo"}]}\n');
+  write(path.join(tmp, 'fallback', 'documents', 'demo', 'source', 'api', 'openapi.json'), '{}\n');
+  mustPass(['scaffold', fallbackWb, '--ui', 'true', '--api', 'true', '--ui-coding', 'true', '--behavior', 'true']);
+  seedScope(fallbackWb);
+  seedPlan(fallbackWb, { reviewReady: true });
+  seedLegacyContracts(fallbackWb, { reviewReady: true });
+  mustPass(['check-contracts', fallbackWb]);
+  approveScope(fallbackWb);
+  addEvidence(fallbackWb, 'superpowers:writing-plans');
+  approvePlan(fallbackWb);
+  addEvidence(fallbackWb, 'superpowers:test-driven-development', 'code');
+  addEvidence(fallbackWb, 'superpowers:executing-plans', 'code');
+  mustPass(['check', fallbackWb, '--action', 'code', '--ui', 'true', '--schema-extract', 'specs/ui-schema-extract.md']);
 
   const legacy = path.join(tmp, 'legacy', 'documents', 'demo', 'workbench');
   mustPass(['init', legacy, '--name', 'Legacy Demo', '--mode', 'standard']);
