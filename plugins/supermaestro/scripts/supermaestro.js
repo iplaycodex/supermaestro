@@ -94,6 +94,9 @@ function main() {
       case 'check-workbench':
         checkWorkbench(workbench);
         break;
+      case 'check-contracts':
+        checkContractsCommand(workbench, options);
+        break;
       case 'approve-scope':
         approveScope(workbench, options);
         break;
@@ -400,6 +403,178 @@ function failWorkbenchCheck(workbench, state, missing, message) {
   throw new Error(message);
 }
 
+function checkContractsCommand(workbench, options) {
+  checkContracts(workbench, {
+    strict: readBoolean(options.strict, false),
+    phase: options.phase || 'manual'
+  });
+}
+
+function checkContracts(workbench, options = {}) {
+  const state = requireState(workbench);
+  const mode = normalizeMode(state.mode || DEFAULT_MODE);
+  const hard = mode === 'strict' || readBoolean(options.strict, false);
+  const issues = collectContractIssues(workbench, state, options);
+  const failures = issues.filter(issue => issue.level === 'FAIL');
+  const warnings = issues.filter(issue => issue.level === 'WARN');
+
+  state.checks = { ...(state.checks || {}) };
+  state.checks.contracts = failures.length ? 'failed' : 'passed';
+  state.checks.contractFailures = failures;
+  state.checks.contractWarnings = warnings;
+  state.updatedAt = now();
+  saveState(workbench, state);
+  appendEvent(workbench, 'check-contracts', {
+    mode,
+    hard,
+    phase: options.phase || 'manual',
+    result: failures.length ? 'failed' : 'passed',
+    failures,
+    warnings
+  });
+
+  if (!options.silent) {
+    if (mode === 'lite' && !hard) {
+      console.log('PASS contracts skipped for lite mode.');
+    }
+    if (!issues.length) {
+      console.log('PASS contracts');
+    } else {
+      for (const issue of issues) {
+        const level = hard ? issue.level : issue.level === 'FAIL' ? 'WARN' : issue.level;
+        console.log(`${level} ${issue.message}`);
+      }
+    }
+  }
+
+  if (hard && failures.length) {
+    throw new Error(`Contract check failed. ${failures.map(issue => issue.message).join('; ')}`);
+  }
+
+  return { failures, warnings, issues };
+}
+
+function collectContractIssues(workbench, state, options = {}) {
+  const mode = normalizeMode(state.mode || DEFAULT_MODE);
+  if (mode === 'lite' && !readBoolean(options.strict, false)) return [];
+
+  const triggers = state.artifacts?.triggers || {};
+  const strict = mode === 'strict' || readBoolean(options.strict, false);
+  const uiRequired = hasUiManifest(workbench) || triggers.ui === true;
+  const apiRequired = hasApiMaterial(workbench) || triggers.api === true;
+  const uiCodingRequired = triggers.uiCoding === true || (strict && uiRequired);
+  const behaviorRequired = triggers.behavior === true || strict;
+  const reviewRequired = triggers.review === true || mode === 'standard' || mode === 'strict';
+  const issues = [];
+
+  if (uiRequired) {
+    requireNonEmpty(issues, workbench, 'specs/ui-contract.md', 'UI contract markdown is missing or empty.');
+    requireJson(issues, workbench, 'specs/ui-contract.json', 'UI contract JSON is missing or invalid.');
+    requireNonEmpty(issues, workbench, 'specs/ui-material-index.md', 'UI material index is missing or empty.');
+  }
+
+  if (uiCodingRequired) {
+    requireNonEmpty(issues, workbench, 'specs/ui-schema-extract.md', 'UI schema extract is missing or empty.');
+    if (requireNonEmpty(issues, workbench, 'specs/ui-schema-map.md', 'UI schema map is missing or empty.')) {
+      const schemaMap = fs.readFileSync(path.join(workbench, 'specs/ui-schema-map.md'), 'utf8');
+      if (!hasSchemaMapHeaders(schemaMap)) {
+        issues.push({ level: 'FAIL', message: 'UI schema map must include Schema 节点/路径, 设计值, 代码文件/组件/样式选择器, 实现值, 偏差说明.' });
+      }
+    }
+  }
+
+  if (apiRequired) {
+    if (requireNonEmpty(issues, workbench, 'specs/api-contract.md', 'API contract markdown is missing or empty.')) {
+      validateApiContractContent(issues, workbench);
+    }
+    requireJson(issues, workbench, 'specs/api-contract.json', 'API contract JSON is missing or invalid.');
+  }
+
+  if (apiRequired && uiRequired) {
+    requireNonEmpty(issues, workbench, 'specs/page-contract-matrix.md', 'Page contract matrix is missing or empty.');
+  }
+
+  if (behaviorRequired && requireNonEmpty(issues, workbench, 'specs/behavior-contract.md', 'Behavior contract is missing or empty.')) {
+    validateBehaviorContractContent(issues, workbench);
+  }
+
+  if (reviewRequired) {
+    validateReviewContract(issues, workbench);
+  }
+
+  return issues;
+}
+
+function requireNonEmpty(issues, workbench, ref, message) {
+  if (hasNonEmptyFile(resolveWorkbenchRef(workbench, ref))) return true;
+  issues.push({ level: 'FAIL', message });
+  return false;
+}
+
+function requireJson(issues, workbench, ref, message) {
+  const file = resolveWorkbenchRef(workbench, ref);
+  if (!hasNonEmptyFile(file)) {
+    issues.push({ level: 'FAIL', message });
+    return false;
+  }
+  try {
+    JSON.parse(fs.readFileSync(file, 'utf8'));
+    return true;
+  } catch {
+    issues.push({ level: 'FAIL', message });
+    return false;
+  }
+}
+
+function validateApiContractContent(issues, workbench) {
+  const content = fs.readFileSync(path.join(workbench, 'specs/api-contract.md'), 'utf8');
+  const hasPlaceholder = /(pending|TODO|待补|待确认)/i.test(content);
+  const hasConclusion = /(blocked|partial|无接口变更|无 API|无接口|no api changes|no interface changes)/i.test(content);
+  const hasConcreteApi = /\b(GET|POST|PUT|DELETE|PATCH)\b|\/[a-z0-9_-]+|接口[:：]/i.test(content);
+  if (hasPlaceholder && !hasConclusion) {
+    issues.push({ level: 'FAIL', message: 'API contract still contains template placeholders without blocked/partial/no-change conclusion.' });
+  }
+  if (!hasConclusion && !hasConcreteApi) {
+    issues.push({ level: 'FAIL', message: 'API contract must contain concrete APIs, blocked/partial status, or explicit no API changes conclusion.' });
+  }
+}
+
+function validateBehaviorContractContent(issues, workbench) {
+  const content = fs.readFileSync(path.join(workbench, 'specs/behavior-contract.md'), 'utf8');
+  const hasPlaceholder = /(pending|TODO|待补|待确认)/i.test(content);
+  const hasRisk = /(open|blocking|blocked|阻塞|风险|pending)/i.test(content);
+  if (hasPlaceholder && !hasRisk) {
+    issues.push({ level: 'FAIL', message: 'Behavior contract still contains template placeholders.' });
+    return;
+  }
+  if (hasRisk) {
+    const projection = [
+      path.join(workbench, 'plans/progress.md'),
+      path.join(workbench, 'reports/validation.md')
+    ]
+      .filter(file => fs.existsSync(file))
+      .map(file => fs.readFileSync(file, 'utf8'))
+      .join('\n\n');
+    if (/(open|blocking|blocked|阻塞|风险)/i.test(content) && !/(behavior|行为|状态机|权限|缓存|并发|阻塞|风险)/i.test(projection)) {
+      issues.push({ level: 'FAIL', message: 'Behavior contract risks must be mirrored in plans/progress.md or reports/validation.md.' });
+    }
+  }
+}
+
+function validateReviewContract(issues, workbench) {
+  const candidates = ['specs/review-contract.md', 'reviews/review-packs.md']
+    .map(ref => resolveWorkbenchRef(workbench, ref))
+    .filter(file => hasNonEmptyFile(file));
+  if (!candidates.length) {
+    issues.push({ level: 'FAIL', message: 'Review contract or review packs are missing.' });
+    return;
+  }
+  const content = candidates.map(file => fs.readFileSync(file, 'utf8')).join('\n\n');
+  if (!/(git diff|diff command|patch|branch|PR|pull request|pending|待实现|待绑定)/i.test(content)) {
+    issues.push({ level: 'FAIL', message: 'Review contract must point to diff/patch/branch/PR or explicitly mark pending state.' });
+  }
+}
+
 function approveScope(workbench, options) {
   const state = requireState(workbench);
   if (state.gates.gate1 === 'approved') {
@@ -447,6 +622,9 @@ function approvePlan(workbench, options) {
   requireUserConfirmation(options, 'Plan gate');
   checkWorkbench(workbench);
   validatePlanWorkbench(workbench);
+  if (isStrict(state)) {
+    checkContracts(workbench, { strict: true, phase: 'plan' });
+  }
   validatePolicyEvidence(workbench, 'gate.plan.approve', 'approve-plan');
 
   const nextState = requireState(workbench);
@@ -487,6 +665,9 @@ function checkAction(workbench, options) {
     }
     if (options.ui === 'true') {
       validateUiSchemaExtract(workbench, options.schemaExtract);
+      if (isStrict(state)) {
+        validateUiSchemaMap(workbench, options.schemaMap || 'specs/ui-schema-map.md');
+      }
     }
     validatePolicyEvidence(workbench, 'action.code', 'code');
     console.log('ALLOW code');
@@ -525,26 +706,38 @@ function verify(workbench, options) {
 
   const policyResult = checkPolicyEvidence(workbench, 'gate.review.request');
   const hardPolicyFailures = policyResult.failures.filter(item => item.enforcement === 'hard');
+  const strictContractFailures = isStrict(state) ? checkContracts(workbench, { strict: true, phase: 'review', silent: true }).failures : [];
+  const strictReviewFailures = isStrict(state) ? validateStrictReviewReadiness(workbench) : [];
 
   state.checks.reviewability = missing.length ? 'failed' : 'passed';
-  state.checks.validation = missing.length || hardPolicyFailures.length ? 'failed' : 'passed';
+  state.checks.validation = missing.length || hardPolicyFailures.length || strictContractFailures.length || strictReviewFailures.length ? 'failed' : 'passed';
   state.checks.verifyMissing = missing;
   state.checks.policyMissing = policyResult.failures;
+  state.checks.contractMissing = strictContractFailures;
+  state.checks.strictReviewMissing = strictReviewFailures;
 
-  if (missing.length || hardPolicyFailures.length) {
+  if (missing.length || hardPolicyFailures.length || strictContractFailures.length || strictReviewFailures.length) {
     state.updatedAt = now();
     saveState(workbench, state);
     appendEvent(workbench, 'verify', {
       strict: readBoolean(options.strict, false),
       result: 'failed',
       missing,
-      policyMissing: policyResult.failures
+      policyMissing: policyResult.failures,
+      contractMissing: strictContractFailures,
+      strictReviewMissing: strictReviewFailures
     });
     const fileText = missing.length ? `Missing or empty: ${missing.join(', ')}` : '';
     const policyText = hardPolicyFailures.length
       ? `Missing policy evidence: ${hardPolicyFailures.map(item => item.label).join(', ')}`
       : '';
-    throw new Error(`Verify failed. ${[fileText, policyText].filter(Boolean).join('; ')}`);
+    const contractText = strictContractFailures.length
+      ? `Contract failures: ${strictContractFailures.map(item => item.message).join(', ')}`
+      : '';
+    const reviewText = strictReviewFailures.length
+      ? `Strict review failures: ${strictReviewFailures.join(', ')}`
+      : '';
+    throw new Error(`Verify failed. ${[fileText, policyText, contractText, reviewText].filter(Boolean).join('; ')}`);
   }
 
   validateVisualEvidence(workbench, validation);
@@ -632,6 +825,7 @@ function approveFinal(workbench, options) {
   if (state.gates.gate4 !== 'final_requested') {
     throw new Error('Final gate is not pending. Run request-final first.');
   }
+  requireUserConfirmation(options, 'Final gate');
   validatePolicyEvidence(workbench, 'gate.final.approve', 'approve-final');
   state.phase = 'final_approved';
   state.gates.gate4 = 'approved';
@@ -683,6 +877,10 @@ function requireCodingGate(state) {
 
 function isLite(state) {
   return normalizeMode(state.mode || DEFAULT_MODE) === 'lite';
+}
+
+function isStrict(state) {
+  return normalizeMode(state.mode || DEFAULT_MODE) === 'strict';
 }
 
 function requireUserConfirmation(options, label) {
@@ -929,6 +1127,58 @@ function validateUiSchemaExtract(workbench, schemaExtract) {
   if (!/资源映射|资源引用|图片图层|image-backed|oss|url\(|https?:\/\//i.test(content)) {
     throw new Error('UI schema extract must include resource mapping evidence for image-backed nodes.');
   }
+}
+
+function validateUiSchemaMap(workbench, schemaMapRef) {
+  const file = resolveWorkbenchRef(workbench, schemaMapRef);
+  if (!hasNonEmptyFile(file)) {
+    throw new Error(`UI schema map is missing or empty: ${schemaMapRef}`);
+  }
+  const content = fs.readFileSync(file, 'utf8');
+  if (!hasSchemaMapHeaders(content)) {
+    throw new Error('UI schema map must include Schema 节点/路径, 设计值, 代码文件/组件/样式选择器, 实现值, 偏差说明.');
+  }
+}
+
+function hasSchemaMapHeaders(content) {
+  return [
+    /Schema\s*节点\/路径|Schema\s*节点|schema_path/i,
+    /设计值|design/i,
+    /代码文件\/组件\/样式选择器|实现位置|selector|component/i,
+    /实现值|implemented|actual/i,
+    /偏差说明|deviation|notes/i
+  ].every(pattern => pattern.test(content));
+}
+
+function validateStrictReviewReadiness(workbench) {
+  const failures = [];
+  const reviewText = [
+    path.join(workbench, 'specs', 'review-contract.md'),
+    path.join(workbench, 'reviews', 'review-packs.md')
+  ]
+    .filter(file => fs.existsSync(file))
+    .map(file => fs.readFileSync(file, 'utf8'))
+    .join('\n\n');
+  if (!/(git diff|diff command|patch|branch|PR|pull request)/i.test(reviewText)) {
+    failures.push('strict Review gate requires review pack to point to a real diff, patch, branch, or PR.');
+  }
+
+  const state = requireState(workbench);
+  if (state.artifacts?.triggers?.reviewAgent === true || fs.existsSync(path.join(workbench, 'reviews', 'code-review'))) {
+    if (!hasSkillEvidence(workbench, 'superpowers:requesting-code-review', false)) {
+      failures.push('strict Review gate requires superpowers:requesting-code-review evidence when review agent is enabled.');
+    }
+  }
+
+  if (/changes-requested|changes requested/i.test(superpowerEvidenceText(workbench))) {
+    const handled = hasSkillEvidence(workbench, 'superpowers:receiving-code-review', false) ||
+      /(技术性驳回|technical rejection|not applicable|超范围)/i.test(superpowerEvidenceText(workbench));
+    if (!handled) {
+      failures.push('changes-requested review findings require receiving-code-review evidence or explicit technical rejection.');
+    }
+  }
+
+  return failures;
 }
 
 function validateVisualEvidence(workbench, validationRef) {
@@ -1252,7 +1502,7 @@ function uiSchemaExtractTemplate() {
 }
 
 function uiSchemaMapTemplate() {
-  return `# UI Schema Map\n\n| Schema 节点 | 资源/结构 | 实现位置 | 验证证据 |\n| --- | --- | --- | --- |\n| pending | pending | pending | pending |\n`;
+  return `# UI Schema Map\n\n| Schema 节点/路径 | 设计值 | 代码文件/组件/样式选择器 | 实现值 | 偏差说明 |\n| --- | --- | --- | --- | --- |\n| pending | pending | pending | pending | pending |\n`;
 }
 
 function pageContractMatrixTemplate() {
@@ -1299,6 +1549,7 @@ function printHelp() {
   node scripts/supermaestro.js next <workbench>
   node scripts/supermaestro.js resume <workbench>
   node scripts/supermaestro.js check-workbench <workbench>
+  node scripts/supermaestro.js check-contracts <workbench> [--strict true]
   node scripts/supermaestro.js approve-scope <workbench> --confirmed-by user --confirmation <text>
   node scripts/supermaestro.js approve-plan <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
   node scripts/supermaestro.js evidence <workbench> --type skill.used --skill superpowers:writing-plans --phase plan --summary <text>
@@ -1308,7 +1559,7 @@ function printHelp() {
   node scripts/supermaestro.js request-review <workbench>
   node scripts/supermaestro.js approve-review <workbench> --review true --validation true
   node scripts/supermaestro.js request-final <workbench>
-  node scripts/supermaestro.js approve-final <workbench> --merge false --commit false --push false --cleanup false
+  node scripts/supermaestro.js approve-final <workbench> --confirmed-by user --confirmation <text> --merge false --commit false --push false --cleanup false
 
 Compatible aliases:
   approve-gate1 -> approve-scope

@@ -10,8 +10,10 @@ Core workflow 只负责状态机、Gate、artifact、action authorization 和 ev
 | --- | --- |
 | `gate.plan.approve` | `superpowers:writing-plans` |
 | `action.code` | `superpowers:test-driven-development`，以及按执行模式要求 `executing-plans` 或 `subagent-driven-development` |
+| `action.code#strict` | 必须有真实 `superpowers:test-driven-development` used evidence，不接受仅 skipped-with-reason |
 | `action.dispatch-subagent` | `superpowers:subagent-driven-development` |
 | `gate.review.request` | `superpowers:verification-before-completion` |
+| `gate.review.request#strict` | 启用 review agent 时需要 `superpowers:requesting-code-review` |
 | `gate.final.request` / `gate.final.approve` / `action.final` | `verification-before-completion` + `finishing-a-development-branch` |
 
 ## Evidence

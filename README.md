@@ -26,6 +26,7 @@ SuperMaestro 支持三种模式：
 node plugins/supermaestro/scripts/supermaestro.js init documents/demo/workbench --name "Demo" --mode standard
 node plugins/supermaestro/scripts/supermaestro.js scaffold documents/demo/workbench --api true --ui true
 node plugins/supermaestro/scripts/supermaestro.js check-workbench documents/demo/workbench
+node plugins/supermaestro/scripts/supermaestro.js check-contracts documents/demo/workbench
 node plugins/supermaestro/scripts/supermaestro.js approve-scope documents/demo/workbench --confirmed-by user --confirmation "用户确认需求理解和范围"
 node plugins/supermaestro/scripts/supermaestro.js evidence documents/demo/workbench --type skill.used --skill superpowers:writing-plans --phase plan --summary "已应用 writing-plans 拆分任务"
 node plugins/supermaestro/scripts/supermaestro.js approve-plan documents/demo/workbench --mode main-serial --confirmed-by user --confirmation "用户确认计划和执行模式"
@@ -34,7 +35,7 @@ node plugins/supermaestro/scripts/supermaestro.js verify documents/demo/workbenc
 node plugins/supermaestro/scripts/supermaestro.js request-review documents/demo/workbench
 node plugins/supermaestro/scripts/supermaestro.js approve-review documents/demo/workbench --review true --validation true
 node plugins/supermaestro/scripts/supermaestro.js request-final documents/demo/workbench
-node plugins/supermaestro/scripts/supermaestro.js approve-final documents/demo/workbench --merge false --commit false --push false --cleanup false
+node plugins/supermaestro/scripts/supermaestro.js approve-final documents/demo/workbench --confirmed-by user --confirmation "用户确认最终动作" --merge false --commit false --push false --cleanup false
 ```
 
 兼容旧命令：
@@ -73,3 +74,32 @@ workbench/reports/evidence.jsonl
 ```
 
 迁移期仍兼容 `reports/validation.md`、`plans/task-plan.md`、`plans/progress.md` 和 `reviews/review-packs.md` 中的旧式文本证据。
+
+## 收尾规则 / Strict mode
+
+`strict` mode 用于多页面、多画板、强 UI、接口契约和高风险任务。相比 `standard`，它会在 Plan Gate 前 hard check contracts，在 UI coding 前要求 `ui-schema-map`，在 Review Gate 前要求 review pack 指向真实 diff / patch / branch / PR。
+
+Final Gate 仍需要独立人工确认：
+
+```bash
+node plugins/supermaestro/scripts/supermaestro.js request-final documents/demo/workbench
+node plugins/supermaestro/scripts/supermaestro.js approve-final documents/demo/workbench --confirmed-by user --confirmation "用户确认最终动作" --merge false --commit false --push false --cleanup false
+```
+
+## Contract validation
+
+手动检查 contracts：
+
+```bash
+node plugins/supermaestro/scripts/supermaestro.js check-contracts documents/demo/workbench
+node plugins/supermaestro/scripts/supermaestro.js check-contracts documents/demo/workbench --strict true
+```
+
+检查项包括：
+
+- UI: `ui-contract.md/json`、`ui-material-index.md`、`ui-schema-extract.md`、`ui-schema-map.md`
+- API: `api-contract.md/json`
+- Behavior: `behavior-contract.md`
+- Review: `review-contract.md` 或 `reviews/review-packs.md`
+
+`strict` mode 下失败会阻塞；`standard` 默认以 warning 形式辅助人工 review。

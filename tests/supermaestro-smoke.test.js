@@ -62,6 +62,7 @@ function assertReadmeCommandsMatchCli() {
     'resume',
     'scaffold',
     'check-workbench',
+    'check-contracts',
     'approve-scope',
     'approve-gate1',
     'approve-plan',

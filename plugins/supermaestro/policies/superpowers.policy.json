@@ -37,6 +37,13 @@
         "enforcement": "hard"
       }
     ],
+    "action.code#strict": [
+      {
+        "skill": "superpowers:test-driven-development",
+        "evidence": "used",
+        "enforcement": "hard"
+      }
+    ],
     "action.dispatch-subagent": [
       {
         "skill": "superpowers:subagent-driven-development",
@@ -47,6 +54,16 @@
     "gate.review.request": [
       {
         "skill": "superpowers:verification-before-completion",
+        "evidence": "used",
+        "enforcement": "hard"
+      }
+    ],
+    "gate.review.request#strict": [
+      {
+        "skill": "superpowers:requesting-code-review",
+        "when": {
+          "artifacts.triggers.reviewAgent": true
+        },
         "evidence": "used",
         "enforcement": "hard"
       }
