@@ -55,7 +55,7 @@ workbench/reviews/review-packs.md
 workbench/reports/validation.md
 ```
 
-`workbench/specs/` 顶层只放人类主文档。机器可读 contract JSON 放在 `workbench/specs/machine/`，包括 `api-contract.json`、`ui-contract.json` 和 `review-contract.json`。迁移期 CLI 仍 fallback 读取旧顶层 JSON。
+`workbench/specs/` 顶层只放人类主文档。机器可读 contract JSON 放在 `workbench/specs/machine/`，包括 `api-contract.json`、`ui-contract.json`、`review-contract.json` 和按 trigger 生成的 `validation-contract.json`。迁移期 CLI 仍 fallback 读取旧顶层 API / UI / review JSON。
 
 `reports/validation.md`, `plans/task-plan.md`, `plans/progress.md`, and `reviews/review-packs.md` remain legacy fallback evidence sources during migration. New machine evidence should be written to `reports/evidence.jsonl` with `supermaestro evidence`.
 
@@ -63,8 +63,9 @@ workbench/reports/validation.md
 
 - Scope Gate confirms scope / non-scope / acceptance alignment. CLI enforces explicit user confirmation through `approve-scope` or legacy `approve-gate1`.
 - Plan Gate confirms execution mode, plan artifacts, review strategy, and policy evidence. CLI enforces `superpowers:writing-plans` evidence through policy checks.
-- Review Gate confirms review packs and verification evidence. CLI enforces `superpowers:verification-before-completion` evidence through policy checks.
-- Final Gate authorizes final actions. CLI enforces independent user confirmation plus `verification-before-completion` and `finishing-a-development-branch` evidence.
+- Review Gate confirms review packs and verification evidence. Both `request-review` and `approve-review` run `verify` so stale or removed evidence cannot pass. CLI also enforces `superpowers:verification-before-completion` evidence through policy checks.
+- Final Gate authorizes final actions. Both `request-final` and `approve-final` run `verify`; CLI also enforces independent user confirmation plus `verification-before-completion` and `finishing-a-development-branch` evidence.
+- Final action checks (`commit`, `merge`, `push`, `cleanup`) run `verify` again before authorization.
 - CLI checks are authoritative. If `supermaestro.js` rejects an action, stop and report the reason.
 
 ## Artifact And Contract Rules
@@ -77,12 +78,30 @@ workbench/reports/validation.md
 - API contract when API material exists or `api=true`.
 - Behavior contract in `strict` mode or `behavior=true`.
 - Review contract in `standard` / `strict` or `review=true`.
+- Validation contract when `e2e=true` or `visual=true`.
+
+E2E and visual validation are opt-in and activate only through explicit `--e2e true` / `--visual true`; `strict + UI` does not enable visual validation automatically. Once active, a trigger is sticky: later scaffold calls, including explicit `false`, cannot downgrade the validation obligation.
+
+First enabling E2E / visual after Plan, Review, or Final invalidates downstream approval: `standard` / `strict` return to Plan pending with Review / Final locked; `lite` revokes a requested or approved Final and locks it for renewed validation.
 
 Strict UI coding uses `specs/ui-schema-extract.md` as the primary UI schema node extraction and Schema-to-implementation mapping document. Legacy `specs/ui-schema-map.md` is accepted only as fallback for old workbenches.
 
 Review Contract lives in `reviews/review-packs.md` as the primary human review entrypoint. Legacy `specs/review-contract.md` is accepted only as fallback for old workbenches. `specs/machine/review-contract.json` may remain as machine-readable metadata.
 
 In `strict` mode, `approve-plan` runs contract validation as a hard gate. In `standard` mode, `check-contracts` is available for manual review and defaults to warnings unless `--strict true` is passed. `lite` skips contract validation by default.
+
+## Structured E2E And Visual Evidence
+
+`specs/machine/validation-contract.json` declares required E2E and visual cases; `reports/evidence.jsonl` records executions as `test.e2e` and `test.visual`. Core workflow owns this contract/evidence boundary, not the project-specific runner or screenshot engine.
+
+- The contract has a top-level `sourceRoot` (relative to workbench or an absolute Git worktree) and `sourceRevision`. `sourceRoot` cannot equal or live inside the workbench; the workbench may live inside the source repo and is excluded from hashing. Generate `sourceRevision` with `source-revision <workbench> [--source-root <git-worktree>]`; do not self-report a commit/hash. Every active section contains at least one unique case with platform, `fixture|mock-api|uat|real` data mode, reproducible command, and expected outcome.
+- Visual cases additionally identify the design/baseline source, target state, purpose (`design-conformance` or `regression`), baseline SHA-256, and maximum diff ratio.
+- Passed evidence records exact case IDs, command, counts, exit code, source revision, report, and existing artifacts. Every test evidence entry is automatically bound to the current `contractHash`; non-blocked evidence also records SHA-256 of report/artifacts, and visual evidence additionally hashes manifest, expected, actual, and diff. After any contract change, the tests must run again. The latest evidence for each case is authoritative.
+- Each visual evidence entry, including blocked evidence, covers exactly one case. Non-blocked entries record baseline manifest, expected, actual, diff, purpose, baseline hash, threshold, diff ratio, and any mask. `expected` must resolve to the contract baseline and its content must match `baselineHash`.
+- A blocked case needs a concrete reason plus `--accepted-skip true --confirmed-by user --confirmation <text>`. Mock, static, or HTTP-success evidence cannot be presented as a real end-to-end result.
+- Any malformed non-empty line in `reports/evidence.jsonl` fails verification closed while structured validation is active.
+
+`source-revision` hashes tracked + non-ignored untracked Git worktree content as `git-working-tree:<sha256>` and excludes the workbench. `verify` recomputes it live, then checks case coverage, contract/evidence agreement, non-empty artifacts, recorded file hashes, visual baseline integrity, and diff/mask thresholds. Source or artifact changes invalidate prior evidence. These checks apply at Review / Final and final action authorization whenever the corresponding trigger is active.
 
 ## Superpowers Policy
 

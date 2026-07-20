@@ -18,11 +18,14 @@ Before UI coding:
 - Schema-to-implementation mapping table
 - Resource mapping for image-backed nodes
 
-Before Gate 2:
+Before Review Gate:
 
-- Visual validation evidence, or explicit `visual-validation-blocked` status.
+- 视觉验证已通过显式 `--visual true` 启用；`strict + UI` 不会自动启用。
+- 每个必测画板/页面状态都有单独一条 `test.visual` evidence；blocked visual 也只能覆盖一个 case，并带 `--accepted-skip true --confirmed-by user --confirmation "<用户确认>"`。
 - Strong visual areas checked block by block.
 - Remaining UI risks listed in `reports/validation.md`.
+
+使用结构化视觉回归时，在 contract 顶层声明 `sourceRoot`，用 `source-revision` 命令计算 `git-working-tree:<sha256>` 后写入 `sourceRevision`，并逐个声明画板/页面状态和 `purpose`。`verify` 会排除 workbench、现场重算 tracked + non-ignored untracked 源码指纹；源码变化即使视觉产物未变也会使 evidence 失效。非 blocked evidence 的 `expected` 必须指向 contract baseline 且 hash 匹配 `baselineHash`。固定 fixture 或 mock 只证明相应数据模式，不等同于 UAT 或真实业务链路。
 
 ## Taro Constraints
 

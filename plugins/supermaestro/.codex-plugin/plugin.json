@@ -1,7 +1,7 @@
 {
   "name": "supermaestro",
-  "version": "1.1.0",
-  "description": "Requirement intake and mission-control workflow suite for turning PRD, API, and Lanhu UI materials into reviewable Codex workbenches.",
+  "version": "1.2.0",
+  "description": "Requirement intake, mission-control, E2E, and visual-validation workflow suite for turning PRD, API, and UI materials into reviewable Codex workbenches.",
   "author": {
     "name": "ALLEN LIU"
   },
@@ -12,13 +12,17 @@
     "lanhu",
     "mission-control",
     "workbench",
+    "e2e",
+    "visual-regression",
+    "validation",
+    "weapp",
     "codex"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "SuperMaestro",
     "shortDescription": "需求物料生成与任务编排工作台",
-    "longDescription": "SuperMaestro packages a requirement intake workflow for Codex: export Lanhu UI schema materials, structure PRDs into traceable facts, and use mission-control to create source/workbench folders, Gate briefs, review packs, and validation records for medium or large software requirements.",
+    "longDescription": "SuperMaestro packages a requirement intake and validation workflow for Codex: export UI materials, structure PRDs into traceable facts, create resumable mission-control workbenches, and audit project-owned E2E or visual-regression evidence at Review Gate.",
     "developerName": "ALLEN LIU",
     "category": "Developer Tools",
     "capabilities": [
@@ -29,7 +33,9 @@
       "使用 $requirement-workbench 接收这个需求，生成 source 物料和 mission-control workbench，先停在 Gate 1。",
       "使用 scripts/supermaestro.js 初始化和检查 workbench 的 state.json、events.jsonl、mission.state.json，再推进 Gate。",
       "使用 $mission-control 处理这个需求，先规划并生成 review pack。",
-      "使用 $lanhu-export 从蓝湖链接导出 schema-only UI 物料。"
+      "使用 $lanhu-export 从蓝湖链接导出 schema-only UI 物料。",
+      "使用 $validate-weapp-e2e 按验证契约运行微信小程序核心链路并记录结构化证据。",
+      "使用 $validate-visual-regression 按画板和状态核验设计还原与视觉回归证据。"
     ],
     "brandColor": "#2563EB"
   }

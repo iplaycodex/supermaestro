@@ -47,7 +47,7 @@ workbench/reviews/review-packs.md
 workbench/reports/validation.md
 ```
 
-`specs/` 顶层放人类主文档，`specs/machine/` 放机器 contract JSON。`specs/ui-schema-extract.md` 同时是 UI schema 节点提取和 Schema 到实现映射主文档；`reviews/review-packs.md` 是 Review Contract 主入口。
+`specs/` 顶层放人类主文档，`specs/machine/` 放机器 contract JSON。`specs/ui-schema-extract.md` 同时是 UI schema 节点提取和 Schema 到实现映射主文档；`reviews/review-packs.md` 是 Review Contract 主入口；启用 E2E / visual trigger 时，`specs/machine/validation-contract.json` 是必测 case 主源。
 
 迁移期 CLI 仍兼容 `reports/validation.md`、`plans/task-plan.md`、`plans/progress.md`、`reviews/review-packs.md` 中的旧式 Superpowers 文本证据。新流程优先使用：
 
@@ -90,7 +90,11 @@ node <plugin-root>/scripts/supermaestro.js init <workbench> --name "<需求名>"
 node <plugin-root>/scripts/supermaestro.js scaffold <workbench> --api true --ui true --ui-coding true --behavior true
 ```
 
-`scaffold` 只按实际 trigger 生成文档和目录，不为了完整性生成空目录或无用文档。
+`scaffold` 只按实际 trigger 生成文档和目录，不为了完整性生成空目录或无用文档。需要 E2E / 视觉验证时，在同一命令中显式追加 `--e2e true` / `--visual true`。
+
+E2E 和 visual 都只在显式传入 `true` 时启用，`strict + UI` 不会自动开启。一旦启用，重复 scaffold 会永久保留对应 trigger，后续传入 `--e2e false` / `--visual false` 也不会降级。
+
+如果在 Plan / Review / Final 后首次新增 E2E 或 visual trigger，`standard` / `strict` 会回退到 Plan pending 并锁定 Review / Final；`lite` 会撤销已请求或已批准的 Final，重新锁回 Final 验证流程。
 
 检查工作台与契约：
 
@@ -98,6 +102,7 @@ node <plugin-root>/scripts/supermaestro.js scaffold <workbench> --api true --ui 
 node <plugin-root>/scripts/supermaestro.js check-workbench <workbench>
 node <plugin-root>/scripts/supermaestro.js check-contracts <workbench>
 node <plugin-root>/scripts/supermaestro.js check-contracts <workbench> --strict true
+node <plugin-root>/scripts/supermaestro.js source-revision <workbench> [--source-root <git-worktree>]
 ```
 
 Gate 命令：
@@ -133,6 +138,23 @@ node <plugin-root>/scripts/supermaestro.js check <workbench> --action commit
 node <plugin-root>/scripts/supermaestro.js check <workbench> --action push
 ```
 
+结构化 E2E / 视觉验证：
+
+1. 在 `specs/machine/validation-contract.json` 顶层声明 `sourceRoot`（相对 workbench 或绝对 Git worktree），运行 `source-revision` 得到 `git-working-tree:<sha256>` 后写入 `sourceRevision`，再逐项声明必测 case。E2E case 需要 `id`、`platform`、`dataMode`、`command`、`expected`；视觉 case 还需要 `sourceRef`、`target`、`purpose`、`baseline`、`baselineHash` 和 `maxDiffRatio`。
+2. 使用项目已有 runner 执行测试，不由 core workflow 安装或绑定特定浏览器、微信开发者工具或像素差异引擎。
+3. 用 `evidence` 命令记录 `test.e2e` / `test.visual`。数据模式只允许 `fixture`、`mock-api`、`uat`、`real`，不得混写验证结论。
+4. 每条视觉 evidence（包括 blocked）只覆盖一个 case；非 blocked evidence 记录 baseline manifest、expected、actual、diff、用途、hash、差异比例、阈值和 mask 信息，且 `expected` 必须指向 contract baseline 并匹配 `baselineHash`。
+5. `source-revision` 会按 Git worktree 的 tracked + non-ignored untracked 内容计算并排除 workbench；`verify` 会现场重算，因此源码变化会使旧 evidence 失效。非 blocked evidence 的 `--source-revision` 必须匹配 contract。CLI 还会绑定 `contractHash` 和产物 SHA-256；contract、源码或产物变化后必须重跑。
+6. blocked evidence 必须写明原因，并同时传入 `--accepted-skip true --confirmed-by user --confirmation "<用户确认>"` 才能通过 `verify`；`reports/evidence.jsonl` 存在 malformed JSON 行时 fail closed。
+
+```bash
+node <plugin-root>/scripts/supermaestro.js evidence <workbench> --type test.e2e --platform weapp --data-mode uat --command "<实际命令>" --result passed --required 1 --executed 1 --passed 1 --failed 0 --case-ids E2E-1 --artifacts "<产物路径>" --report "<报告路径>" --exit-code 0 --source-revision "<contract.sourceRevision>"
+node <plugin-root>/scripts/supermaestro.js evidence <workbench> --type test.visual --platform weapp --data-mode fixture --command "<实际命令>" --result passed --required 1 --executed 1 --passed 1 --failed 0 --case-ids VIS-1 --artifacts "<产物路径>" --report "<报告路径>" --exit-code 0 --source-revision "<contract.sourceRevision>" --baseline-manifest "<manifest>" --actual "<actual>" --expected "<contract中的baseline路径>" --diff "<diff>" --purpose design-conformance --baseline-hash "<contract中的sha256>" --diff-ratio 0 --max-diff-ratio 0.05
+node <plugin-root>/scripts/supermaestro.js evidence <workbench> --type test.e2e --platform weapp --data-mode uat --result blocked --case-ids "<contract-case-id>" --reason "测试账号暂不可用，用户接受本次跳过" --accepted-skip true --confirmed-by user --confirmation "用户确认接受本次 E2E 跳过"
+```
+
+需要执行细则时按任务选用 `validate-weapp-e2e` 或 `validate-visual-regression`；Mission Control 只负责 trigger、contract、evidence 和 Gate enforcement。
+
 ## Gate 语义
 
 ### Scope Gate
@@ -162,7 +184,8 @@ CLI enforcement:
 CLI enforcement:
 
 - `request-review` 要求 Plan approved。
-- `verify` 要求 `superpowers:verification-before-completion` evidence。
+- `request-review` 先执行 `verify`；`approve-review` 在批准前再次执行 `verify`，防止等待期间 contract、evidence 或产物失效。
+- `verify` 要求 `superpowers:verification-before-completion` evidence；启用 E2E / visual trigger 时，还会核对 validation contract 与每个 case 的最新结构化 evidence。
 - `strict` mode 下 Review Gate 不接受只有 pending、没有 diff/patch/branch/PR 的 review pack。
 - 启用 review agent 时，`strict` mode 要求 `superpowers:requesting-code-review` evidence。
 
@@ -172,9 +195,10 @@ CLI enforcement:
 
 CLI enforcement:
 
-- `request-final` 要求 Review approved，`lite` 要求 Scope approved 并通过 verify。
+- `request-final` 要求 Review approved，`lite` 要求 Scope approved；`request-final` 与 `approve-final` 都会重新执行 `verify`，防止 Final Gate 等待期间 contract、evidence 或产物失效。
 - `request-final` / `approve-final` 要求 `verification-before-completion` 与 `finishing-a-development-branch` evidence。
 - `approve-final` 要求独立 `--confirmed-by user` 和 `--confirmation`。
+- `check --action commit|merge|push|cleanup` 在最终动作授权前也会再次执行 `verify`。
 
 ## Strict Mode Contract Validation
 
@@ -183,6 +207,7 @@ CLI enforcement:
 - Plan Gate 前，UI material 需要 `specs/ui-contract.md`、`specs/machine/ui-contract.json`、`specs/ui-material-index.md`、`specs/ui-schema-extract.md`，并要求 `ui-schema-extract.md` 内含标准 Schema 到实现映射表；旧工作台可 fallback 到 `specs/ui-contract.json` 与 `specs/ui-schema-map.md`。
 - Plan Gate 前，API material 需要 `specs/api-contract.md` 与 `specs/machine/api-contract.json`；旧工作台可 fallback 到 `specs/api-contract.json`。
 - 同时存在 API + UI 时，需要 `page-contract-matrix.md`。
+- 显式 `e2e=true` 或 `visual=true` 后，需要 contract 顶层 `sourceRoot` 和 CLI 计算的 `sourceRevision`，且对应 section 至少包含一个合法 case；视觉 case 还需合法 `purpose`、baseline 和 `baselineHash`。验证结果由匹配现场源码指纹、当前 `contractHash` 和产物哈希的 evidence 覆盖。
 - `behavior=true` 或 `strict` mode 需要 `behavior-contract.md`；无复杂行为时允许用明确结论收敛，例如“结论：无状态机、权限、缓存、并发行为变更。”
 - `standard` / `strict` 或 `review=true` 需要 `reviews/review-packs.md` 内含 Review Contract 表；旧工作台可 fallback 到 `specs/review-contract.md`。机器 JSON 可放 `specs/machine/review-contract.json`。
 - UI coding 前需要 `schema-extract`；`strict` mode 要求 `schema-extract` 内含标准映射表，旧工作台可 fallback 到 `schema-map`。
@@ -209,6 +234,7 @@ node <plugin-root>/scripts/supermaestro.js evidence <workbench> --type skill.use
 - 强视觉节点建议优先绑定设计资源或 OSS 资源；资源缺失时记录 blocked，不建议用 CSS 近似替代。
 - 有 API 物料时，建议在 `api-contract.md` 与 `specs/machine/api-contract.json` 中记录接口、字段、loading/empty/error、mock 和 no-change 结论。
 - 有状态机、权限、跳转、缓存、并发或异常分支时，建议维护 `behavior-contract.md`。
+- 有关键用户链路时启用 E2E trigger；有设计还原或视觉回归要求时启用 visual trigger，并确保每个 PRD/画板状态都有独立 case 和可定位产物。
 
 ## Review 与交接建议
 

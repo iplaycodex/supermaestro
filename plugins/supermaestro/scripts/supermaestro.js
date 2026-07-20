@@ -2,6 +2,18 @@
 
 const fs = require('fs');
 const path = require('path');
+const {
+  collectValidationContractIssues,
+  collectValidationEvidenceIssues,
+  createTestEvidenceEntry,
+  createValidationContract,
+  hashValidationContract,
+  recordTestEvidenceArtifactHashes
+} = require('./validation-evidence');
+const {
+  fingerprintGitWorkingTree,
+  resolveValidationSourceRoot
+} = require('./source-fingerprint');
 
 const WORKFLOW_VERSION = 2;
 const VALID_MODES = new Set(['lite', 'standard', 'strict']);
@@ -96,6 +108,9 @@ function main() {
         break;
       case 'check-contracts':
         checkContractsCommand(workbench, options);
+        break;
+      case 'source-revision':
+        printSourceRevision(workbench, options);
         break;
       case 'approve-scope':
         approveScope(workbench, options);
@@ -251,7 +266,13 @@ function resume(workbench) {
 function scaffold(workbench, options) {
   const state = requireState(workbench);
   const mode = normalizeMode(options.mode || state.mode || DEFAULT_MODE);
-  const triggers = detectArtifactTriggers(workbench, options, mode);
+  const previousTriggers = state.artifacts?.triggers || {};
+  const triggers = detectArtifactTriggers(
+    workbench,
+    options,
+    mode,
+    previousTriggers
+  );
   const artifacts = requiredArtifactsFor(mode, triggers);
   const created = [];
 
@@ -264,6 +285,12 @@ function scaffold(workbench, options) {
   }
 
   state.mode = mode;
+  const validationPlanInvalidated = invalidatePlanForValidationExpansion(
+    state,
+    previousTriggers,
+    triggers,
+    mode
+  );
   state.artifacts = {
     ...(state.artifacts || {}),
     triggers,
@@ -273,20 +300,61 @@ function scaffold(workbench, options) {
   state.updatedAt = now();
   saveState(workbench, state);
   writeProjection(workbench, state);
-  appendEvent(workbench, 'scaffold', { mode, triggers, created });
+  appendEvent(workbench, 'scaffold', { mode, triggers, created, validationPlanInvalidated });
   console.log(`Scaffolded ${created.length} artifact(s) for ${mode} mode.`);
   if (created.length) {
     for (const file of created) console.log(`- ${file}`);
   }
 }
 
-function detectArtifactTriggers(workbench, options, mode) {
+function invalidatePlanForValidationExpansion(state, previousTriggers, triggers, mode) {
+  const expanded = ['e2e', 'visual'].filter(
+    kind => previousTriggers[kind] !== true && triggers[kind] === true
+  );
+  if (!expanded.length) return [];
+
+  if (mode === 'lite') {
+    if (state.gates.gate4 === 'final_requested' || state.gates.gate4 === 'approved') {
+      state.phase = 'scope_approved';
+      state.gates.gate4 = 'locked';
+      delete state.finalActions;
+      if (state.humanConfirmations) delete state.humanConfirmations.gate4;
+    }
+    return expanded;
+  }
+
+  if (state.gates.gate2 === 'approved') {
+    state.phase = 'scope_approved';
+    state.gates.gate2 = 'pending';
+    state.gates.gate3 = 'locked';
+    state.gates.gate4 = 'locked';
+    state.execution = {
+      mode: null,
+      worktree: false,
+      subagents: false,
+      checkpoint: false
+    };
+    delete state.finalActions;
+    if (state.humanConfirmations) {
+      delete state.humanConfirmations.gate2;
+      delete state.humanConfirmations.gate3;
+      delete state.humanConfirmations.gate4;
+    }
+  }
+  return expanded;
+}
+
+function detectArtifactTriggers(workbench, options, mode, existingTriggers = {}) {
   const api = readBoolean(options.api, hasApiMaterial(workbench));
   const ui = readBoolean(options.ui, hasUiManifest(workbench));
+  const e2e = existingTriggers.e2e === true || readBoolean(options.e2e, false);
+  const visual = existingTriggers.visual === true || readBoolean(options.visual, false);
   return {
     mode,
     api,
     ui,
+    e2e,
+    visual,
     uiCoding: readBoolean(options.uiCoding || options.uiCode || options.ui, ui && mode === 'strict'),
     behavior: readBoolean(options.behavior, mode !== 'lite'),
     review: readBoolean(options.review, mode !== 'lite'),
@@ -304,6 +372,10 @@ function requiredArtifactsFor(mode, triggers) {
     artifact('reports/evidence.jsonl', () => ''),
     artifact('reports/validation.md', validationTemplate),
   ];
+
+  if (triggers.e2e || triggers.visual) {
+    artifacts.push(artifact('specs/machine/validation-contract.json', validationContractJsonTemplate));
+  }
 
   if (mode === 'lite') {
     artifacts.push(artifact('brief.md', liteBriefTemplate));
@@ -465,6 +537,7 @@ function collectContractIssues(workbench, state, options = {}) {
   const uiCodingRequired = triggers.uiCoding === true || (strict && uiRequired);
   const behaviorRequired = triggers.behavior === true || strict;
   const reviewRequired = triggers.review === true || mode === 'standard' || mode === 'strict';
+  const validationRequired = triggers.e2e === true || triggers.visual === true;
   const issues = [];
 
   if (uiRequired) {
@@ -505,7 +578,30 @@ function collectContractIssues(workbench, state, options = {}) {
     validateReviewContract(issues, workbench);
   }
 
+  if (validationRequired) {
+    validateValidationContractContent(issues, workbench, triggers);
+  }
+
   return issues;
+}
+
+function validateValidationContractContent(issues, workbench, triggers) {
+  const ref = 'specs/machine/validation-contract.json';
+  const file = resolveWorkbenchRef(workbench, ref);
+  if (!hasNonEmptyFile(file)) {
+    issues.push({ level: 'FAIL', message: 'Validation contract JSON is missing or empty.' });
+    return;
+  }
+  let contract;
+  try {
+    contract = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    issues.push({ level: 'FAIL', message: 'Validation contract JSON is invalid.' });
+    return;
+  }
+  for (const message of collectValidationContractIssues(contract, triggers)) {
+    issues.push({ level: 'FAIL', message });
+  }
 }
 
 function requireNonEmpty(issues, workbench, ref, message) {
@@ -702,6 +798,7 @@ function checkAction(workbench, options) {
 
   if (['commit', 'merge', 'push', 'cleanup'].includes(action)) {
     requireGate(state, 'gate4');
+    verify(workbench, {});
     validatePolicyEvidence(workbench, 'action.final', action);
     console.log(`ALLOW ${action}`);
     return;
@@ -724,15 +821,17 @@ function verify(workbench, options) {
   const hardPolicyFailures = policyResult.failures.filter(item => item.enforcement === 'hard');
   const strictContractFailures = isStrict(state) ? checkContracts(workbench, { strict: true, phase: 'review', silent: true }).failures : [];
   const strictReviewFailures = isStrict(state) ? validateStrictReviewReadiness(workbench) : [];
+  const testEvidenceFailures = validateStructuredTestEvidence(workbench, state);
 
   state.checks.reviewability = missing.length ? 'failed' : 'passed';
-  state.checks.validation = missing.length || hardPolicyFailures.length || strictContractFailures.length || strictReviewFailures.length ? 'failed' : 'passed';
+  state.checks.validation = missing.length || hardPolicyFailures.length || strictContractFailures.length || strictReviewFailures.length || testEvidenceFailures.length ? 'failed' : 'passed';
   state.checks.verifyMissing = missing;
   state.checks.policyMissing = policyResult.failures;
   state.checks.contractMissing = strictContractFailures;
   state.checks.strictReviewMissing = strictReviewFailures;
+  state.checks.testEvidenceMissing = testEvidenceFailures;
 
-  if (missing.length || hardPolicyFailures.length || strictContractFailures.length || strictReviewFailures.length) {
+  if (missing.length || hardPolicyFailures.length || strictContractFailures.length || strictReviewFailures.length || testEvidenceFailures.length) {
     state.updatedAt = now();
     saveState(workbench, state);
     appendEvent(workbench, 'verify', {
@@ -741,7 +840,8 @@ function verify(workbench, options) {
       missing,
       policyMissing: policyResult.failures,
       contractMissing: strictContractFailures,
-      strictReviewMissing: strictReviewFailures
+      strictReviewMissing: strictReviewFailures,
+      testEvidenceMissing: testEvidenceFailures
     });
     const fileText = missing.length ? `Missing or empty: ${missing.join(', ')}` : '';
     const policyText = hardPolicyFailures.length
@@ -753,10 +853,13 @@ function verify(workbench, options) {
     const reviewText = strictReviewFailures.length
       ? `Strict review failures: ${strictReviewFailures.join(', ')}`
       : '';
-    throw new Error(`Verify failed. ${[fileText, policyText, contractText, reviewText].filter(Boolean).join('; ')}`);
+    const evidenceText = testEvidenceFailures.length
+      ? `Validation evidence failures: ${testEvidenceFailures.join(', ')}`
+      : '';
+    throw new Error(`Verify failed. ${[fileText, policyText, contractText, reviewText, evidenceText].filter(Boolean).join('; ')}`);
   }
 
-  validateVisualEvidence(workbench, validation);
+  validateVisualEvidence(workbench, validation, state);
   state.updatedAt = now();
   saveState(workbench, state);
   appendEvent(workbench, 'verify', {
@@ -793,7 +896,7 @@ function requestReview(workbench, options) {
 }
 
 function approveReview(workbench, options) {
-  const state = requireState(workbench);
+  let state = requireState(workbench);
   if (isLite(state)) {
     console.log('Review gate is skipped in lite mode.');
     return;
@@ -806,6 +909,8 @@ function approveReview(workbench, options) {
   if (!reviewAccepted || !validationAccepted) {
     throw new Error('Review gate approval requires review and validation to be accepted.');
   }
+  verify(workbench, {});
+  state = requireState(workbench);
   state.phase = 'review_approved';
   state.gates.gate3 = 'approved';
   state.gates.gate4 = 'pending';
@@ -821,10 +926,10 @@ function requestFinal(workbench, options) {
   const state = requireState(workbench);
   if (isLite(state)) {
     requireGate(state, 'gate1');
-    verify(workbench, options);
   } else {
     requireGate(state, 'gate3');
   }
+  verify(workbench, options);
   validatePolicyEvidence(workbench, 'gate.final.request', 'request-final');
   state.phase = 'final_pending';
   state.gates.gate4 = 'final_requested';
@@ -837,11 +942,13 @@ function requestFinal(workbench, options) {
 }
 
 function approveFinal(workbench, options) {
-  const state = requireState(workbench);
+  let state = requireState(workbench);
   if (state.gates.gate4 !== 'final_requested') {
     throw new Error('Final gate is not pending. Run request-final first.');
   }
   requireUserConfirmation(options, 'Final gate');
+  verify(workbench, {});
+  state = requireState(workbench);
   validatePolicyEvidence(workbench, 'gate.final.approve', 'approve-final');
   state.phase = 'final_approved';
   state.gates.gate4 = 'approved';
@@ -862,16 +969,18 @@ function approveFinal(workbench, options) {
 function addEvidenceCommand(workbench, options) {
   requireState(workbench);
   const type = options.type || 'skill.used';
-  const entry = {
-    type,
-    at: now(),
-    phase: options.phase || '',
-    skill: options.skill || '',
-    command: options.command || '',
-    result: options.result || '',
-    summary: options.summary || options.reason || '',
-    source: options.source || 'agent'
-  };
+  const entry = type.startsWith('test.')
+    ? createStructuredTestEvidence(workbench, options)
+    : {
+        type,
+        at: now(),
+        phase: options.phase || '',
+        skill: options.skill || '',
+        command: options.command || '',
+        result: options.result || '',
+        summary: options.summary || options.reason || '',
+        source: options.source || 'agent'
+      };
   if (type.startsWith('skill.') && !entry.skill) {
     throw new Error('Skill evidence requires --skill.');
   }
@@ -881,6 +990,129 @@ function addEvidenceCommand(workbench, options) {
   appendEvidence(workbench, entry);
   appendEvent(workbench, 'evidence.added', { type: entry.type, skill: entry.skill, phase: entry.phase });
   console.log(`Evidence added: ${entry.type}${entry.skill ? ` ${entry.skill}` : ''}`);
+}
+
+function createStructuredTestEvidence(workbench, options) {
+  const type = String(options.type || '').trim();
+  const kind = type === 'test.e2e' ? 'e2e' : type === 'test.visual' ? 'visual' : '';
+  if (!kind) throw new Error(`Unsupported test evidence type: ${type}`);
+
+  const file = resolveWorkbenchRef(workbench, 'specs/machine/validation-contract.json');
+  if (!hasNonEmptyFile(file)) {
+    throw new Error(`${type} evidence requires specs/machine/validation-contract.json.`);
+  }
+
+  let contract;
+  try {
+    contract = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    throw new Error('Validation contract JSON is invalid.');
+  }
+
+  const state = requireState(workbench);
+  const stateTriggers = state.artifacts?.triggers || {};
+  const effectiveTriggers = {
+    e2e: stateTriggers.e2e === true || contract.e2e?.required === true,
+    visual: stateTriggers.visual === true || contract.visual?.required === true
+  };
+  const contractIssues = collectValidationContractIssues(contract, effectiveTriggers);
+  if (contractIssues.length) {
+    throw new Error(`Validation contract is not ready: ${contractIssues.join(', ')}`);
+  }
+  if (effectiveTriggers[kind] !== true) {
+    throw new Error(`${type} evidence requires an active ${kind} validation contract.`);
+  }
+
+  const currentSourceRevision = currentValidationSourceRevision(workbench, contract);
+  if (contract.sourceRevision !== currentSourceRevision) {
+    throw new Error(
+      `Validation contract sourceRevision is stale. Current source revision: ${currentSourceRevision}`
+    );
+  }
+
+  const entry = createTestEvidenceEntry(options, {
+    at: now(),
+    source: options.source || 'agent',
+    contractHash: hashValidationContract(contract)
+  });
+  const knownIds = new Set(contract[kind].cases.map(testCase => testCase.id));
+  const unknownIds = entry.caseIds.filter(caseId => !knownIds.has(caseId));
+  if (unknownIds.length) {
+    throw new Error(`${type} evidence references unknown contract case(s): ${unknownIds.join(', ')}.`);
+  }
+  if (entry.result !== 'blocked' && entry.sourceRevision !== contract.sourceRevision) {
+    throw new Error(`${type} evidence --source-revision must match the validation contract.`);
+  }
+  return recordTestEvidenceArtifactHashes(entry, workbench);
+}
+
+function validateStructuredTestEvidence(workbench, state) {
+  const triggers = state.artifacts?.triggers || {};
+  const file = resolveWorkbenchRef(workbench, 'specs/machine/validation-contract.json');
+  if (!hasNonEmptyFile(file)) {
+    return triggers.e2e === true || triggers.visual === true
+      ? ['Validation contract JSON is missing or empty.']
+      : [];
+  }
+
+  let contract;
+  try {
+    contract = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return ['Validation contract JSON is invalid.'];
+  }
+
+  const effectiveTriggers = {
+    e2e: triggers.e2e === true || contract.e2e?.required === true,
+    visual: triggers.visual === true || contract.visual?.required === true
+  };
+  if (effectiveTriggers.e2e !== true && effectiveTriggers.visual !== true) return [];
+
+  const contractIssues = collectValidationContractIssues(contract, effectiveTriggers);
+  if (contractIssues.length) return contractIssues;
+  let currentSourceRevision;
+  try {
+    currentSourceRevision = currentValidationSourceRevision(workbench, contract);
+  } catch (error) {
+    return [error.message];
+  }
+  if (contract.sourceRevision !== currentSourceRevision) {
+    return [
+      `Validation contract sourceRevision does not match the current Git working tree: ${currentSourceRevision}.`
+    ];
+  }
+
+  return collectValidationEvidenceIssues({
+    workbench,
+    triggers: effectiveTriggers,
+    contract,
+    evidence: readEvidence(workbench)
+  });
+}
+
+function currentValidationSourceRevision(workbench, contract) {
+  const sourceRoot = resolveValidationSourceRoot(workbench, contract.sourceRoot);
+  return fingerprintGitWorkingTree(sourceRoot, { excludePaths: [workbench] });
+}
+
+function printSourceRevision(workbench, options) {
+  requireState(workbench);
+  let sourceRoot = String(options.sourceRoot || '').trim();
+  if (!sourceRoot) {
+    const file = resolveWorkbenchRef(workbench, 'specs/machine/validation-contract.json');
+    if (!hasNonEmptyFile(file)) {
+      throw new Error('source-revision requires --source-root or a validation contract.');
+    }
+    let contract;
+    try {
+      contract = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      throw new Error('Validation contract JSON is invalid.');
+    }
+    sourceRoot = contract.sourceRoot;
+  }
+  const resolvedRoot = resolveValidationSourceRoot(workbench, sourceRoot);
+  console.log(fingerprintGitWorkingTree(resolvedRoot, { excludePaths: [workbench] }));
 }
 
 function requireCodingGate(state) {
@@ -1033,13 +1265,13 @@ function readEvidence(workbench) {
   if (!fs.existsSync(file)) return [];
   return fs.readFileSync(file, 'utf8')
     .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
+    .map((line, index) => ({ raw: line.trim(), line: index + 1 }))
+    .filter(item => item.raw)
+    .map(item => {
       try {
-        return JSON.parse(line);
+        return JSON.parse(item.raw);
       } catch {
-        return { type: 'parse-error', raw: line };
+        return { type: 'parse-error', raw: item.raw, line: item.line };
       }
     });
 }
@@ -1210,7 +1442,8 @@ function validateStrictReviewReadiness(workbench) {
   return failures;
 }
 
-function validateVisualEvidence(workbench, validationRef) {
+function validateVisualEvidence(workbench, validationRef, state = requireState(workbench)) {
+  if (state.artifacts?.triggers?.visual === true) return;
   if (!hasUiManifest(workbench)) return;
   const file = resolveWorkbenchRef(workbench, validationRef);
   const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
@@ -1482,8 +1715,15 @@ function liteBriefTemplate(state) {
   return `# Lite Brief\n\n## 状态\n\n状态：待确认\n确认人：-\n\n## 本次要做\n\n- TODO\n\n## 本次不做\n\n- TODO\n\n## 验证方式\n\n- TODO\n\n## 用户确认摘要\n\n- TODO\n`;
 }
 
-function validationTemplate() {
-  return `# 验证报告\n\n## Superpowers / Policy Evidence\n\n结构化证据优先记录到 \`reports/evidence.jsonl\`。迁移期可在此保留人工可读摘要。\n\n## 命令\n\n| 命令 | 结果 | 摘要 |\n| --- | --- | --- |\n| pending | pending | pending |\n\n## UI / Visual Validation\n\n- pending\n\n## 风险与阻塞\n\n- pending\n`;
+function validationTemplate(_state, triggers = {}) {
+  const structured = triggers.e2e || triggers.visual
+    ? `\n## 结构化 E2E / Visual Evidence\n\n- Contract: \`specs/machine/validation-contract.json\`\n- E2E required: ${triggers.e2e === true}\n- Visual required: ${triggers.visual === true}\n- Evidence: \`reports/evidence.jsonl\`（\`test.e2e\` / \`test.visual\`）\n`
+    : '';
+  return `# 验证报告\n\n## Superpowers / Policy Evidence\n\n结构化证据优先记录到 \`reports/evidence.jsonl\`。迁移期可在此保留人工可读摘要。\n\n## 命令\n\n| 命令 | 结果 | 摘要 |\n| --- | --- | --- |\n| pending | pending | pending |\n${structured}\n## UI / Visual Validation\n\n- pending\n\n## 风险与阻塞\n\n- pending\n`;
+}
+
+function validationContractJsonTemplate(_state, triggers = {}) {
+  return `${JSON.stringify(createValidationContract(triggers), null, 2)}\n`;
 }
 
 function contextTemplate(state) {
@@ -1569,15 +1809,18 @@ function integrationPlanTemplate() {
 function printHelp() {
   console.log(`Usage:
   node scripts/supermaestro.js init <workbench> --name <name> --mode <lite|standard|strict>
-  node scripts/supermaestro.js scaffold <workbench> [--api true] [--ui true] [--brainstorming true] [--worktree true] [--subagents true]
+  node scripts/supermaestro.js scaffold <workbench> [--api true] [--ui true] [--e2e true] [--visual true] [--brainstorming true] [--worktree true] [--subagents true]
   node scripts/supermaestro.js status <workbench>
   node scripts/supermaestro.js next <workbench>
   node scripts/supermaestro.js resume <workbench>
   node scripts/supermaestro.js check-workbench <workbench>
   node scripts/supermaestro.js check-contracts <workbench> [--strict true]
+  node scripts/supermaestro.js source-revision <workbench> [--source-root <git-worktree>]
   node scripts/supermaestro.js approve-scope <workbench> --confirmed-by user --confirmation <text>
   node scripts/supermaestro.js approve-plan <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
   node scripts/supermaestro.js evidence <workbench> --type skill.used --skill superpowers:writing-plans --phase plan --summary <text>
+  node scripts/supermaestro.js evidence <workbench> --type test.e2e --platform weapp --data-mode uat --command <command> --result passed --required 1 --executed 1 --passed 1 --failed 0 --case-ids E2E-1 --artifacts <paths> --report <path> --exit-code 0 --source-revision <revision>
+  node scripts/supermaestro.js evidence <workbench> --type test.visual --platform weapp --data-mode fixture --purpose design-conformance --command <command> --result passed --required 1 --executed 1 --passed 1 --failed 0 --case-ids VIS-1 --artifacts <paths> --report <path> --baseline-manifest <path> --baseline-hash <sha256> --expected <path> --actual <path> --diff <path> --diff-ratio 0 --max-diff-ratio 0.05 --exit-code 0 --source-revision <revision>
   node scripts/supermaestro.js check <workbench> --action code --ui true --schema-extract specs/ui-schema-extract.md
   node scripts/supermaestro.js check <workbench> --action code --non-ui true --reason <reason>
   node scripts/supermaestro.js check <workbench> --action dispatch-subagent
