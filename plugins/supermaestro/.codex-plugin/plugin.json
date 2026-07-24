@@ -1,6 +1,6 @@
 {
   "name": "supermaestro",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "将 PRD、API 与 UI 物料整理为可审查、可恢复研发工作台的 Codex 插件。",
   "author": {
     "name": "ALLEN LIU"

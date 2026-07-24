@@ -1,6 +1,6 @@
 {
   "name": "supermaestro",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "description": "面向 Codex 的需求接收、任务编排与验证工作流插件。",
   "license": "UNLICENSED",

@@ -15,7 +15,7 @@ SuperMaestro 是一个 Codex 研发工作流插件。它把 PRD、API、蓝湖/U
 
 ## 版本与兼容性
 
-- 当前插件发行版本为 `2.0.0`，`package.json` 与 `.codex-plugin/plugin.json` 必须始终保持一致。
+- 当前插件发行版本为 `2.0.1`，`package.json` 与 `.codex-plugin/plugin.json` 必须始终保持一致。
 - 新工作台使用 `workflowVersion: 3`；它是 SuperMaestro 内部状态契约版本，不等于插件主版本。
 - v2 工作台不会由 `status`、`resume` 或其他命令静默升级，只能显式重新运行
   `init <workbench>` 迁移。迁移保留原有 `source/` 和工作台物料；有效 Scope
