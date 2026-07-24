@@ -35,6 +35,10 @@ function write(file, content) {
   fs.writeFileSync(file, content);
 }
 
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
 function assertReadmeCommandsMatchCli() {
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
   const commandRe = /node plugins\/supermaestro\/scripts\/supermaestro\.js\s+([^\s]+)/g;
@@ -46,7 +50,10 @@ function assertReadmeCommandsMatchCli() {
     'scaffold',
     'check-workbench',
     'check-contracts',
+    'check-reviewability',
     'source-revision',
+    'run-verification',
+    'register-worktree',
     'approve-scope',
     'approve-gate1',
     'approve-plan',
@@ -80,14 +87,17 @@ function seedPlan(workbench, { reviewReady = false } = {}) {
   write(path.join(workbench, 'plans', 'task-plan.md'), '# Plan\n\n任务：验证 strict contracts。\n\n验证：运行 npm test。\n');
   write(
     path.join(workbench, 'reports', 'validation.md'),
-    '# Validation\n\n- TDD 决策：适用，已覆盖 strict contract 用例。\n- 完成前验证：运行 npm test，结果通过，exit code 0。\n- UI schema-only 人工核对通过。\n'
+    '# Validation\n\n- TDD 决策：适用，已覆盖 strict contract 用例。\n- 完成前验证：运行 npm test，结果通过，exit code 0。\n- UI schema-only 人工核对通过。\n- 行为风险：无状态机、权限、缓存或并发行为变更。\n'
   );
   write(
     path.join(workbench, 'reviews', 'review-packs.md'),
     reviewReady
-      ? '# Review Packs\n\n## Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | Demo | git diff HEAD | CLI | npm test | strict contracts | 无 |\n'
+      ? '# Review Packs\n\n## Review Contract\n\n| RP | Scope | Patch | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | Demo | reviews/rp1.patch | CLI | npm test | strict contracts | 无 |\n'
       : '# Review Packs\n\n## Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | Demo | pending | pending | pending | strict contracts | Plan 阶段待实现后绑定 diff |\n'
   );
+  if (reviewReady) {
+    write(path.join(workbench, 'reviews', 'rp1.patch'), 'diff --git a/demo.js b/demo.js\n--- a/demo.js\n+++ b/demo.js\n@@ -0,0 +1 @@\n+verified\n');
+  }
 }
 
 function seedContracts(workbench) {
@@ -103,6 +113,15 @@ function seedContracts(workbench) {
 }
 
 function seedLegacyContracts(workbench, { reviewReady = false } = {}) {
+  for (const name of [
+    'ui-contract.json',
+    'api-contract.json',
+    'review-contract.json'
+  ]) {
+    fs.rmSync(path.join(workbench, 'specs', 'machine', name), {
+      force: true
+    });
+  }
   write(path.join(workbench, 'specs', 'ui-contract.md'), '# UI Contract\n\n画板：Demo\n资源映射：schema-only。\n');
   write(path.join(workbench, 'specs', 'ui-contract.json'), '{"version":1,"boards":[{"name":"Demo"}]}\n');
   write(path.join(workbench, 'specs', 'ui-material-index.md'), '# UI 物料索引\n\nmanifest: source/ui/manifest.json\n');
@@ -125,7 +144,35 @@ function approveScope(workbench) {
 }
 
 function approvePlan(workbench) {
-  mustPass(['approve-gate2', workbench, '--mode', 'main-serial', '--confirmed-by', 'user', '--confirmation', '用户确认 plan']);
+  mustPass([
+    'approve-gate2',
+    workbench,
+    '--mode',
+    'main-serial',
+    '--confirmed-by',
+    'user',
+    '--confirmation',
+    '用户确认 plan',
+    '--visual-decision',
+    'not-applicable',
+    '--visual-reason',
+    '本轮仅核对 schema，不需要截图基线'
+  ]);
+}
+
+function recordCommandEvidence(workbench) {
+  mustPass([
+    'run-verification',
+    workbench,
+    '--program',
+    process.execPath,
+    '--args-json',
+    '["-e","process.stdout.write(\\"verified\\\\n\\")"]',
+    '--report',
+    'reports/command.log',
+    '--artifacts',
+    'reports/validation.md'
+  ]);
 }
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'supermaestro-strict-contracts-'));
@@ -134,7 +181,7 @@ try {
   assertReadmeCommandsMatchCli();
 
   const strict = path.join(tmp, 'strict', 'documents', 'demo', 'workbench');
-  mustPass(['init', strict, '--name', 'Strict Demo', '--mode', 'strict']);
+  mustPass(['init', strict, '--name', 'Strict Demo', '--mode', 'strict', '--source-root', repoRoot]);
   write(path.join(tmp, 'strict', 'documents', 'demo', 'source', 'ui', 'manifest.json'), '{"boards":[{"name":"Demo"}]}\n');
   write(path.join(tmp, 'strict', 'documents', 'demo', 'source', 'api', 'openapi.json'), '{}\n');
   mustPass(['scaffold', strict, '--ui', 'true', '--api', 'true', '--ui-coding', 'true', '--behavior', 'true']);
@@ -150,7 +197,7 @@ try {
   mustFail(['check-contracts', strict], /FAIL/);
 
   const brainstormingWb = path.join(tmp, 'brainstorming', 'documents', 'demo', 'workbench');
-  mustPass(['init', brainstormingWb, '--name', 'Brainstorming Demo', '--mode', 'strict']);
+  mustPass(['init', brainstormingWb, '--name', 'Brainstorming Demo', '--mode', 'strict', '--source-root', repoRoot]);
   mustPass(['scaffold', brainstormingWb, '--brainstorming', 'true']);
   assert.equal(fs.existsSync(path.join(brainstormingWb, 'specs', 'gate-1-brainstorming-questions.md')), true);
 
@@ -159,11 +206,46 @@ try {
   seedContracts(strict);
   mustPass(['check-contracts', strict]);
   approveScope(strict);
+  mustFail(
+    [
+      'approve-gate2',
+      strict,
+      '--mode',
+      'main-serial',
+      '--confirmed-by',
+      'user',
+      '--confirmation',
+      '用户确认 plan'
+    ],
+    /visual-decision/
+  );
+  mustFail(
+    [
+      'approve-gate2',
+      strict,
+      '--mode',
+      'main-serial',
+      '--confirmed-by',
+      'user',
+      '--confirmation',
+      '用户确认 plan',
+      '--visual-decision',
+      'blocked',
+      '--visual-reason',
+      '当前测试环境无法启动页面截图'
+    ],
+    /Plan gate remains pending/
+  );
+  assert.equal(readJson(path.join(strict, 'state.json')).gates.gate2, 'pending');
+  assert.equal(
+    readJson(path.join(strict, 'state.json')).validationDecisions.visual.decision,
+    'blocked'
+  );
   approvePlan(strict);
   mustPass(['check', strict, '--action', 'code', '--ui', 'true', '--schema-extract', 'specs/ui-schema-extract.md']);
 
   const finalWb = path.join(tmp, 'strict-final', 'documents', 'demo', 'workbench');
-  mustPass(['init', finalWb, '--name', 'Strict Final', '--mode', 'strict']);
+  mustPass(['init', finalWb, '--name', 'Strict Final', '--mode', 'strict', '--source-root', repoRoot]);
   write(path.join(tmp, 'strict-final', 'documents', 'demo', 'source', 'ui', 'manifest.json'), '{"boards":[{"name":"Demo"}]}\n');
   write(path.join(tmp, 'strict-final', 'documents', 'demo', 'source', 'api', 'openapi.json'), '{}\n');
   mustPass(['scaffold', finalWb, '--ui', 'true', '--api', 'true', '--ui-coding', 'true', '--behavior', 'true', '--review-agent', 'true']);
@@ -176,14 +258,26 @@ try {
   write(path.join(finalWb, 'reviews', 'code-review', 'RP1.md'), '# Review Agent RP1\n\nstatus: changes-requested\n');
   mustFail(['request-gate3', finalWb], /unresolved pending or changes-requested/);
   write(path.join(finalWb, 'reviews', 'code-review', 'RP1.md'), '# Review Agent RP1\n\nstatus: agent-approved\n');
+  recordCommandEvidence(finalWb);
   mustPass(['request-gate3', finalWb]);
-  mustPass(['approve-gate3', finalWb, '--review', 'true', '--validation', 'true']);
+  mustPass([
+    'approve-gate3',
+    finalWb,
+    '--review-accepted',
+    'true',
+    '--validation-accepted',
+    'true',
+    '--confirmed-by',
+    'user',
+    '--confirmation',
+    '用户确认 review 与验证结果'
+  ]);
   mustPass(['request-gate4', finalWb]);
   mustFail(['approve-gate4', finalWb, '--merge', 'false'], /confirmed-by user/);
   mustPass(['approve-gate4', finalWb, '--confirmed-by', 'user', '--confirmation', '用户确认 final action', '--merge', 'false', '--commit', 'false', '--push', 'false', '--cleanup', 'false']);
 
   const fallbackWb = path.join(tmp, 'fallback', 'documents', 'demo', 'workbench');
-  mustPass(['init', fallbackWb, '--name', 'Fallback Demo', '--mode', 'strict']);
+  mustPass(['init', fallbackWb, '--name', 'Fallback Demo', '--mode', 'strict', '--source-root', repoRoot]);
   write(path.join(tmp, 'fallback', 'documents', 'demo', 'source', 'ui', 'manifest.json'), '{"boards":[{"name":"Demo"}]}\n');
   write(path.join(tmp, 'fallback', 'documents', 'demo', 'source', 'api', 'openapi.json'), '{}\n');
   mustPass(['scaffold', fallbackWb, '--ui', 'true', '--api', 'true', '--ui-coding', 'true', '--behavior', 'true']);
@@ -196,14 +290,26 @@ try {
   mustPass(['check', fallbackWb, '--action', 'code', '--ui', 'true', '--schema-extract', 'specs/ui-schema-extract.md']);
 
   const legacy = path.join(tmp, 'legacy', 'documents', 'demo', 'workbench');
-  mustPass(['init', legacy, '--name', 'Legacy Demo', '--mode', 'standard']);
+  mustPass(['init', legacy, '--name', 'Legacy Demo', '--mode', 'standard', '--source-root', repoRoot]);
   mustPass(['scaffold', legacy]);
   seedScope(legacy);
   seedPlan(legacy, { reviewReady: true });
   approveScope(legacy);
   approvePlan(legacy);
+  recordCommandEvidence(legacy);
   mustPass(['request-gate3', legacy]);
-  mustPass(['approve-gate3', legacy, '--review', 'true', '--validation', 'true']);
+  mustPass([
+    'approve-gate3',
+    legacy,
+    '--review-accepted',
+    'true',
+    '--validation-accepted',
+    'true',
+    '--confirmed-by',
+    'user',
+    '--confirmation',
+    '用户确认 legacy review'
+  ]);
   mustPass(['request-gate4', legacy]);
   mustPass(['approve-gate4', legacy, '--confirmed-by', 'user', '--confirmation', '用户确认 legacy final', '--merge', 'false']);
 

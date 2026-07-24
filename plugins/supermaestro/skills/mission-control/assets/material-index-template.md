@@ -18,7 +18,8 @@
 | 任务计划 | plans/task-plan.md | 稳定任务拆分和边界 | pending |  |
 | 进度同步 | plans/progress.md | 动态任务状态和阻塞项 | pending |  |
 | 接口文档 | ../source/api/ | API 契约 | pending |  |
-| 接口规格 | specs/api-spec.md | 接口封装/mock/联调主事实源 | pending | 有接口/API/mock 物料时必填 |
+| API 发现 | specs/api-spec.md | Scope 阶段的来源、接口清单与缺口 | pending | 有接口/API/mock 物料时必填 |
+| API 可执行契约 | specs/api-contract.md | Plan 阶段的实现与联调主事实源 | pending | 进入 Plan Gate 前必填 |
 | 页面契约矩阵 | specs/page-contract-matrix.md | 页面、UI、API/mock、RP 绑定关系 | pending | 同时存在 API + UI 物料时必填 |
 | Mock 数据 |  | 本地联调/验收 | pending |  |
 | UI 设计稿 | ../source/ui/ | 视觉和交互 | pending |  |
@@ -42,6 +43,7 @@
 - UI 主事实源：../source/ui/schemas/*.json
 - 接口主事实源：
 - 接口规格：
+- API 可执行契约：
 - 页面契约矩阵：
 - Mock 主事实源：
 
@@ -52,7 +54,7 @@
 - 覆盖接口数量：
 - 入参/出参是否完整：
 - Mock/异常/空态是否覆盖：
-- 是否阻塞 Gate 1：
+- 是否阻塞 Scope Gate：
 
 ## UI 资料包摘要
 
@@ -62,7 +64,7 @@
 - schema/image 可读数量：
 - 路径或 dry-run 风险：
 - 疑似备份/旁支画板：
-- 是否阻塞 Gate 1：
+- 是否阻塞 Scope Gate：
 
 ## 待确认问题
 

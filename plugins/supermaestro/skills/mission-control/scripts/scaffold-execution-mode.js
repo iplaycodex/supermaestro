@@ -1,114 +1,133 @@
 #!/usr/bin/env node
 
+'use strict'
+
 const fs = require('fs')
 const path = require('path')
+const { spawnSync } = require('child_process')
 
-function usage() {
-  console.error('Usage: node scripts/scaffold-execution-mode.js <workbench-dir> [--force true|false] [--tasks true|false] [--agents true|false] [--review-agents true|false] [--contract true|false] [--integration true|false]')
-  process.exit(1)
-}
-
-function parseArgs(argv) {
-  const workbench = argv[2]
-  const flags = {}
-  for (let i = 3; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (!arg.startsWith('--')) continue
-    const key = arg.slice(2)
-    const next = argv[i + 1]
-    if (!next || next.startsWith('--')) {
-      flags[key] = true
-    } else {
-      flags[key] = next
-      i += 1
-    }
-  }
-  return { workbench, flags }
-}
-
-function bool(value, fallback = false) {
-  if (value === undefined || value === null || value === '') return fallback
-  return value === true || value === 'true' || value === '1' || value === 'yes'
-}
-
-function readJson(file) {
-  return JSON.parse(fs.readFileSync(file, 'utf8'))
-}
-
-function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true })
-}
-
-function writeIfNeeded(file, content, force, created) {
-  ensureDir(path.dirname(file))
-  if (fs.existsSync(file) && !force) return
-  fs.writeFileSync(file, content.endsWith('\n') ? content : `${content}\n`)
-  created.push(path.relative(process.cwd(), file))
-}
-
-function countReviewPacks(workbench) {
-  const reviewFile = path.join(workbench, 'reviews', 'review-packs.md')
-  if (!fs.existsSync(reviewFile)) return 0
-  const content = fs.readFileSync(reviewFile, 'utf8')
-  return (content.match(/^###\s+RP\d+/gm) || []).length
-}
-
-function main() {
-  const { workbench, flags } = parseArgs(process.argv)
-  if (!workbench) usage()
-  const dir = path.resolve(process.cwd(), workbench)
-  const stateFile = path.join(dir, 'harness.state.json')
-  if (!fs.existsSync(stateFile)) {
-    console.error('Missing harness.state.json. Run harness init/approve-gate1 first.')
-    process.exit(2)
-  }
-
-  const state = readJson(stateFile)
-  const force = bool(flags.force, false)
-  const created = []
-  const rpCount = countReviewPacks(dir)
-  const allowWorktree = state.allowWorktree === true
-  const allowSubagents = state.allowSubagents === true
-  const allowCheckpointCommit = state.allowCheckpointCommit === true
-  const generateTasks = bool(flags.tasks, false)
-  const generateAgents = bool(flags.agents, false)
-  const generateReviewAgents = bool(flags['review-agents'], false)
-  const generateContract = bool(flags.contract, false)
-  const generateIntegration = bool(flags.integration, false)
-
-  if (allowWorktree) {
-    writeIfNeeded(path.join(dir, 'worktrees', 'plan.md'), '# Worktree 计划\n\n默认使用主仓库同级目录 `<repo>.worktrees/<task-id>`；任务状态由主控维护在主工作台 `plans/progress.md`。worker worktree 内的工作台文件不是全局状态源，必须由主控 fan-in 回本文件。\n\n| 任务 | Worktree | Branch | Base | 状态 | 备注 |\n| --- | --- | --- | --- | --- | --- |\n', force, created)
-    if (generateTasks) {
-      writeIfNeeded(path.join(dir, 'tasks', 'index.md'), '# 任务卡索引\n\n任务状态维护在 `plans/progress.md`；这里只放确实需要独立任务卡的链接。\n\n| 任务 | 任务卡 | 用途 |\n| --- | --- | --- |\n', force, created)
-    }
-    if (generateIntegration) {
-    writeIfNeeded(path.join(dir, 'integration', 'plan.md'), '# 集成计划\n\n请从 `assets/integration-plan-template.md` 复制并补齐。\n', force, created)
-    }
-  }
-
-  if (allowSubagents && generateAgents) {
-    writeIfNeeded(path.join(dir, 'agents', 'agent-index.md'), '# Agent 索引\n\n本索引只由主控更新。worker 只写自己 worktree 内的 handoff；主控读取 handoff 后 fan-in 状态。\n\n| 任务 | Agent/Thread | Brief | Handoff | 状态 |\n| --- | --- | --- | --- | --- |\n', force, created)
-  }
-
-  if (allowSubagents && generateReviewAgents) {
-    writeIfNeeded(path.join(dir, 'reviews', 'code-review', 'index.md'), '# Review Agent 记录\n\nReview agent 只读审查，不修改代码、不暂存、不提交、不清理 worktree，也不直接更新主控 progress/review pack。主控读取 review 输出后 fan-in 到 `reviews/review-packs.md` 和 `plans/progress.md`。\n\n| RP | Review agent | 输入 artifact | 状态 | Findings | 输出 |\n| --- | --- | --- | --- | --- | --- |\n', force, created)
-  }
-
-  if (generateContract) {
-    writeIfNeeded(path.join(dir, 'contract-changes', 'index.md'), '# Contract Change Requests\n\n| CCR | 状态 | 发起任务 | 影响契约 | 决策 |\n| --- | --- | --- | --- | --- |\n', force, created)
-  }
-
-  if (!allowCheckpointCommit && rpCount > 1) {
-    writeIfNeeded(path.join(dir, 'reviews', 'patches', 'index.md'), '# Review Patches\n\nGate 1 未授权 checkpoint commit，不能自动提交；Gate 2 前每个 RP 应提供 worktree 未提交 diff 或一个 `.patch` 文件，包含 tracked 与 untracked 新文件。\n\n| RP | Patch / Worktree diff | 状态 |\n| --- | --- | --- |\n', force, created)
-  }
-
-  console.log(`executionMode=${state.executionMode || 'unknown'} worktree=${allowWorktree} subagents=${allowSubagents} checkpoint=${allowCheckpointCommit} reviewPacks=${rpCount} tasks=${generateTasks} agents=${generateAgents} reviewAgents=${generateReviewAgents} contract=${generateContract} integration=${generateIntegration}`)
-  if (created.length) {
-    console.log('Created/updated:')
-    created.forEach(item => console.log(`- ${item}`))
-  } else {
-    console.log('No optional execution-mode files needed or files already exist.')
-  }
-}
+const ROOT_CLI = path.resolve(__dirname, '../../../scripts/supermaestro.js')
+const ALLOWED_FLAGS = new Set([
+  'agents',
+  'review-agents',
+  'contract',
+  'integration'
+])
 
 main()
+
+/**
+ * 旧版可选模块脚手架兼容入口。
+ *
+ * 不再读取 harness.state.json，也不直接维护另一份模板。它只检查主状态
+ * 中已经由 Plan Gate 授权的执行能力，再转发给根 supermaestro CLI。
+ */
+function main() {
+  const [workbenchArg, ...args] = process.argv.slice(2)
+  if (!workbenchArg || workbenchArg === '--help') {
+    usage(workbenchArg === '--help' ? 0 : 1)
+  }
+
+  const workbench = path.resolve(process.cwd(), workbenchArg)
+  const stateFile = path.join(workbench, 'state.json')
+  if (!fs.existsSync(stateFile)) {
+    fail('缺少 state.json；请先运行主 CLI init 并完成 Plan Gate。')
+  }
+
+  const flags = parseFlags(args)
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
+  if (state.gates?.gate2 !== 'approved') {
+    fail('Plan Gate 尚未批准，不能生成执行模式相关文件。')
+  }
+
+  const execution = state.execution || {}
+  if (flags.agents === true && execution.subagents !== true) {
+    fail('Plan Gate 未授权 subagents。')
+  }
+  if (flags['review-agents'] === true && execution.subagents !== true) {
+    fail('Plan Gate 未授权 subagents，不能启用 review agent。')
+  }
+  if (execution.worktree !== true && state.artifacts?.triggers?.worktree === true) {
+    fail('当前工作台声明了 worktree，但 Plan Gate 未授权 worktree。')
+  }
+
+  const forwarded = [
+    'scaffold',
+    workbench,
+    '--mode',
+    state.mode,
+    '--worktree',
+    String(execution.worktree === true),
+    '--subagents',
+    String(flags.agents === true || execution.subagents === true),
+    '--review-agent',
+    String(flags['review-agents'] === true),
+    '--contract-changes',
+    String(flags.contract === true),
+    '--integration',
+    String(flags.integration === true)
+  ]
+  const result = spawnSync(process.execPath, [ROOT_CLI, ...forwarded], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: process.env
+  })
+
+  if (result.stdout) process.stdout.write(result.stdout)
+  if (result.stderr) process.stderr.write(result.stderr)
+  if (result.error) fail(`启动主 CLI 失败：${result.error.message}`)
+  process.exit(result.status == null ? 1 : result.status)
+}
+
+function parseFlags(args) {
+  const flags = {}
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (!arg.startsWith('--')) fail(`不支持的位置参数：${arg}`)
+
+    const separator = arg.indexOf('=')
+    const key = separator === -1 ? arg.slice(2) : arg.slice(2, separator)
+    if (!ALLOWED_FLAGS.has(key)) fail(`不支持的参数：--${key}`)
+
+    let value
+    if (separator !== -1) {
+      value = arg.slice(separator + 1)
+    } else {
+      const next = args[index + 1]
+      if (!next || next.startsWith('--')) {
+        value = true
+      } else {
+        value = next
+        index += 1
+      }
+    }
+    flags[key] = parseBoolean(value)
+  }
+  return flags
+}
+
+function parseBoolean(value) {
+  if (value === true || value === 'true' || value === '1' || value === 'yes') return true
+  if (value === false || value === 'false' || value === '0' || value === 'no') return false
+  fail(`无效布尔值：${value}`)
+}
+
+function usage(exitCode) {
+  const text = `
+兼容入口（已弃用）：
+  node scripts/scaffold-execution-mode.js <workbench> \
+    [--agents true] [--review-agents true] \
+    [--contract true] [--integration true]
+
+新调用请直接使用：
+  node <plugin-root>/scripts/supermaestro.js scaffold <workbench> ...
+`
+  const target = exitCode === 0 ? process.stdout : process.stderr
+  target.write(text.trimStart())
+  process.exit(exitCode)
+}
+
+function fail(message) {
+  process.stderr.write(`scaffold-execution-mode adapter: ${message}\n`)
+  process.exit(1)
+}

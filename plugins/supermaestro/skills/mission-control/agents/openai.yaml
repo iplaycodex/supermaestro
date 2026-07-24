@@ -1,4 +1,4 @@
 interface:
-  display_name: "Mission Control"
-  short_description: "编排可恢复需求、Review Pack、UI闸门与Gate交付"
+  display_name: "任务控制台"
+  short_description: "编排可恢复需求、四道人工门禁、Review Pack 与结构化验证证据"
   default_prompt: "使用 $mission-control 处理这个需求：先建立 source/workbench 工作台，通过根 scripts/supermaestro.js 的 resume/next 判断阶段，依次经过 Scope、Plan、Review、Final Gate；显式声明验证 trigger，用 source-revision 绑定 Git worktree，并在 Gate 和最终动作前现场复验源码及产物。"

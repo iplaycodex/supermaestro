@@ -4,11 +4,21 @@
 
 负责整个交付过程。读取 PRD 和仓库上下文，创建共享上下文包，拆分任务 DAG，派发子 agent，监控进度，审查交接，集成代码并输出最终状态。
 
-主控不能在派发后丢掉责任。它必须检查子 agent 输出，并验证子 agent 的完成声明；这一步只是完成性检查，不替代独立代码审查。真实编码 worker 完成后，主控应新开只读 review agent 审查对应 RP。
+主控不能在派发后丢掉责任。它必须检查子 agent 输出，并验证子 agent 的完成声明；这一步只是完成性检查，不替代独立代码审查。真实编码 worker 完成后，主控应新开只读 review agent 审查对应 RP；`main-serial` 的真实 RP/diff 也可独立启用 review agent。
 
 主控默认使用主控/集成工作区管理上下文、看板、任务卡和最终集成。编码型子 agent 应在自己的 worktree/分支内工作；如果主控决定降级到单工作区，必须先向用户说明原因、风险和 review pack 拆分方案。
 
 主控是全局状态唯一写入者。worker 和 review agent 的 worktree 产物不会自动同步回主控工作台；主控必须从 handoff、diff、验证记录和 review 输出 fan-in，更新 `plans/progress.md`、`agents/agent-index.md`、`worktrees/plan.md`、`reviews/review-packs.md` 和 `reports/validation.md`。
+
+主控还负责 worktree 所有权闭环：用精确 `target/branch/base` 记录创建意图，
+在调用方完成 `git worktree add` 后运行 `register-worktree`，并在派发、
+同步物料和 checkpoint commit 前用已登记 `--target` 检查。CLI 不替主控
+执行 worktree 创建或删除。
+
+多 worktree 时，主控选择单一 integration target 并完成 fan-in。worker
+局部验证只作为 handoff；主控确认其他 registered target clean、其 HEAD 已
+成为 integration HEAD 的祖先后，在 integration target 重跑主验证并请求
+Review/Final。
 
 主控必须保护 review 成本：不要把多个子任务直接混成一个大 diff 交给用户。每个实现任务完成后，应形成独立 review pack。
 
@@ -34,7 +44,9 @@
 - 只编辑任务卡允许的文件。
 - 不要擅自修改共享契约；如果确实需要，先反馈给主控。
 - 返回改动文件、行为总结、验证结果和风险。
-- 不要在主控工作区编码；编码路径以任务卡给出的 worktree/分支为准。
+- 不要在主控工作区编码；只能使用任务卡中已登记的 worktree target/branch/base。
+- 不得自行登记、收编、替换或清理 worktree；发现目标与 Git 状态不一致时，
+  立即交回主控。
 - 不要修改主控工作台全局状态文件；只写本任务 handoff 和验证记录，由主控 fan-in。
 - 返回 review pack 信息：文件列表、建议 diff 命令、验证命令和排除项。
 

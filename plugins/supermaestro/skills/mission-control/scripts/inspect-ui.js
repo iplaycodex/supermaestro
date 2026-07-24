@@ -13,24 +13,53 @@ Usage:
 }
 
 function parseArgs(argv) {
-  const requirementDir = argv[2]
+  let requirementDir = ''
   const flags = {}
+  const valueFlags = new Set(['manifest', 'ui-dir'])
+  const booleanFlags = new Set(['json', 'write-index', 'help'])
+  const allowedFlags = new Set([...valueFlags, ...booleanFlags])
 
-  for (let i = 3; i < argv.length; i += 1) {
+  for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
-    if (!arg.startsWith('--')) continue
-    const eqIndex = arg.indexOf('=')
-    if (eqIndex !== -1) {
-      flags[arg.slice(2, eqIndex)] = arg.slice(eqIndex + 1)
+    if (!arg.startsWith('--')) {
+      if (requirementDir) {
+        throw new Error(`Unexpected positional argument: ${arg}`)
+      }
+      requirementDir = arg
       continue
     }
-    const key = arg.slice(2)
+    const eqIndex = arg.indexOf('=')
+    const key = eqIndex === -1 ? arg.slice(2) : arg.slice(2, eqIndex)
+    if (!allowedFlags.has(key)) {
+      throw new Error(`Unknown option: --${key}`)
+    }
+    if (Object.prototype.hasOwnProperty.call(flags, key)) {
+      throw new Error(`Duplicate option: --${key}`)
+    }
+
+    if (eqIndex !== -1) {
+      const value = arg.slice(eqIndex + 1)
+      if (!value) throw new Error(`Missing value for --${key}`)
+      flags[key] = value
+      continue
+    }
+
+    if (valueFlags.has(key)) {
+      const value = argv[i + 1]
+      if (!value || value.startsWith('--')) {
+        throw new Error(`Missing value for --${key}`)
+      }
+      flags[key] = value
+      i += 1
+      continue
+    }
+
     const next = argv[i + 1]
-    if (!next || next.startsWith('--')) {
-      flags[key] = true
-    } else {
+    if (next && !next.startsWith('--')) {
       flags[key] = next
       i += 1
+    } else {
+      flags[key] = true
     }
   }
 
@@ -54,8 +83,50 @@ function readJson(filePath, fallback = null) {
 }
 
 function writeJson(filePath, value) {
+  writeTextAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`)
+}
+
+function writeTextAtomic(filePath, content) {
   ensureDir(path.dirname(filePath))
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`)
+  const tempPath = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
+  )
+  try {
+    fs.writeFileSync(tempPath, content, {
+      encoding: 'utf8',
+      mode: 0o600
+    })
+    fs.renameSync(tempPath, filePath)
+  } finally {
+    if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+  }
+}
+
+function writeWorkbenchText(workbench, relativePath, content) {
+  const rootPath = path.resolve(workbench)
+  const filePath = path.resolve(rootPath, relativePath)
+  if (!isPathInside(rootPath, filePath) || filePath === rootPath) {
+    throw new Error(`Output path must stay inside the workbench: ${filePath}`)
+  }
+
+  const parentPath = path.dirname(filePath)
+  if (fs.existsSync(parentPath) && fs.lstatSync(parentPath).isSymbolicLink()) {
+    throw new Error(`Output directory must not be a symlink: ${parentPath}`)
+  }
+  ensureDir(parentPath)
+
+  const realRoot = realpath(rootPath, 'Workbench root')
+  const realParent = realpath(parentPath, 'Output directory')
+  if (!isPathInside(realRoot, realParent)) {
+    throw new Error(`Output directory resolves outside the workbench: ${parentPath}`)
+  }
+  if (fs.existsSync(filePath) && fs.lstatSync(filePath).isSymbolicLink()) {
+    throw new Error(`Output file must not be a symlink: ${filePath}`)
+  }
+
+  writeTextAtomic(filePath, content)
+  return filePath
 }
 
 function maybeRelative(baseDir, targetPath) {
@@ -73,6 +144,85 @@ function maybeRelative(baseDir, targetPath) {
 function requirementRoot(dir) {
   if (path.basename(dir) === 'workbench') return path.dirname(dir)
   return dir
+}
+
+function isPathInside(root, target) {
+  const relative = path.relative(path.resolve(root), path.resolve(target))
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+function normalizeRelativeRef(ref, label) {
+  if (typeof ref !== 'string' || !ref.trim()) {
+    throw new Error(`${label} must be a non-empty relative path.`)
+  }
+  const value = ref.trim()
+  if (value.includes('\0')) {
+    throw new Error(`${label} contains a null byte.`)
+  }
+  if (path.isAbsolute(value) || path.win32.isAbsolute(value)) {
+    throw new Error(`${label} must not be an absolute path: ${value}`)
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    throw new Error(`${label} must be a local relative path, not a URI: ${value}`)
+  }
+
+  const segments = value.split(/[\\/]+/)
+  if (segments.includes('..')) {
+    throw new Error(`${label} must not contain ".." traversal: ${value}`)
+  }
+
+  return segments.filter(segment => segment && segment !== '.').join(path.sep)
+}
+
+function realpath(filePath, label) {
+  try {
+    return fs.realpathSync.native(filePath)
+  } catch (error) {
+    throw new Error(`${label} cannot be resolved: ${filePath}`)
+  }
+}
+
+function assertExistingPathInside(filePath, allowedRealRoots, label) {
+  const resolved = realpath(filePath, label)
+  if (!allowedRealRoots.some(root => isPathInside(root, resolved))) {
+    throw new Error(`${label} resolves outside the allowed UI roots: ${filePath}`)
+  }
+  return resolved
+}
+
+function buildUiPathPolicy(dir, uiDir) {
+  const root = requirementRoot(dir)
+  const rootReal = realpath(root, 'Requirement root')
+  const candidateRoots = Array.from(new Set([
+    path.join(dir, 'ui'),
+    path.join(root, 'source', 'ui'),
+    path.join(root, 'input', 'ui')
+  ].map(candidate => path.resolve(candidate))))
+
+  if (!candidateRoots.some(candidate => isPathInside(candidate, uiDir))) {
+    throw new Error(`UI directory must stay under workbench/ui, source/ui, or input/ui: ${uiDir}`)
+  }
+
+  const uiDirReal = realpath(uiDir, 'UI directory')
+  if (!isPathInside(rootReal, uiDirReal)) {
+    throw new Error(`UI directory resolves outside the requirement root: ${uiDir}`)
+  }
+
+  const allowedRealRoots = candidateRoots
+    .filter(candidate => fs.existsSync(candidate))
+    .map(candidate => realpath(candidate, 'Allowed UI root'))
+    .filter(candidate => isPathInside(rootReal, candidate))
+
+  if (!allowedRealRoots.some(candidate => isPathInside(candidate, uiDirReal))) {
+    throw new Error(`UI directory resolves outside the allowed UI roots: ${uiDir}`)
+  }
+
+  return {
+    allowedRoots: candidateRoots,
+    allowedRealRoots,
+    rootReal,
+    uiDirReal
+  }
 }
 
 function defaultUiDir(dir) {
@@ -151,7 +301,7 @@ function pickRecordPath(record, keys) {
   return ''
 }
 
-function resolveManifestFile(ref, uiDir, fallbackDir) {
+function resolveManifestFile(ref, uiDir, fallbackDir, pathPolicy, label) {
   const result = {
     ref: ref || '',
     actualPath: '',
@@ -161,10 +311,18 @@ function resolveManifestFile(ref, uiDir, fallbackDir) {
 
   if (!ref) return result
 
-  const manifestPath = path.isAbsolute(ref) ? ref : path.resolve(uiDir, ref)
+  const relativeRef = normalizeRelativeRef(ref, label)
+  const manifestPath = path.resolve(uiDir, relativeRef)
+  if (!isPathInside(uiDir, manifestPath)) {
+    throw new Error(`${label} escapes the selected UI directory: ${ref}`)
+  }
   if (fs.existsSync(manifestPath)) {
     result.exists = true
-    result.actualPath = manifestPath
+    result.actualPath = assertExistingPathInside(
+      manifestPath,
+      pathPolicy.allowedRealRoots,
+      label
+    )
     return result
   }
 
@@ -172,7 +330,11 @@ function resolveManifestFile(ref, uiDir, fallbackDir) {
   const fallbackPath = fallbackDir && basename ? path.join(fallbackDir, basename) : ''
   if (fallbackPath && fs.existsSync(fallbackPath)) {
     result.exists = true
-    result.actualPath = fallbackPath
+    result.actualPath = assertExistingPathInside(
+      fallbackPath,
+      pathPolicy.allowedRealRoots,
+      `${label} fallback`
+    )
     result.relocated = true
   }
 
@@ -206,13 +368,25 @@ function buildWarnings(summary, boards) {
 }
 
 function buildInspection(dir, flags) {
-  const uiDir = path.resolve(dir, flags['ui-dir'] || defaultUiDir(dir))
-  const manifestPath = flags.manifest
-    ? path.resolve(dir, flags.manifest)
+  const uiDir = flags['ui-dir']
+    ? path.resolve(dir, normalizeRelativeRef(flags['ui-dir'], '--ui-dir'))
+    : path.resolve(defaultUiDir(dir))
+  const pathPolicy = buildUiPathPolicy(dir, uiDir)
+  const requestedManifestPath = flags.manifest
+    ? path.resolve(dir, normalizeRelativeRef(flags.manifest, '--manifest'))
     : path.join(uiDir, 'manifest.json')
-  if (!fs.existsSync(manifestPath)) {
-    throw new Error(`UI manifest not found: ${manifestPath}`)
+
+  if (!pathPolicy.allowedRoots.some(root => isPathInside(root, requestedManifestPath))) {
+    throw new Error(`UI manifest must stay under an allowed UI root: ${requestedManifestPath}`)
   }
+  if (!fs.existsSync(requestedManifestPath)) {
+    throw new Error(`UI manifest not found: ${requestedManifestPath}`)
+  }
+  const manifestPath = assertExistingPathInside(
+    requestedManifestPath,
+    pathPolicy.allowedRealRoots,
+    'UI manifest'
+  )
 
   const manifest = readJson(manifestPath)
   if (!manifest || typeof manifest !== 'object') {
@@ -234,8 +408,21 @@ function buildInspection(dir, flags) {
       'preview_path',
       'preview.path'
     ])
-    const schemaInfo = resolveManifestFile(schemaRef, uiDir, path.join(uiDir, 'schemas'))
-    const imageInfo = resolveManifestFile(imageRef, uiDir, path.join(uiDir, 'images'))
+    const boardLabel = record.name || record.title || record.image_name || record.imageName || `#${index + 1}`
+    const schemaInfo = resolveManifestFile(
+      schemaRef,
+      uiDir,
+      path.join(uiDir, 'schemas'),
+      pathPolicy,
+      `Schema path for board ${boardLabel}`
+    )
+    const imageInfo = resolveManifestFile(
+      imageRef,
+      uiDir,
+      path.join(uiDir, 'images'),
+      pathPolicy,
+      `Image path for board ${boardLabel}`
+    )
     const imageSize = readImageSize(imageInfo.actualPath)
     const schemaMeta = readSchemaMeta(schemaInfo.actualPath)
     const designWidth = schemaMeta.width || null
@@ -290,7 +477,13 @@ function buildInspection(dir, flags) {
     errored: boards.filter(board => board.status === 'error').length,
     schemaFound: boards.filter(board => board.schema.exists).length,
     imageFound: boards.filter(board => board.image.exists).length,
-    absolutePathRefs: boards.filter(board => board.schema.ref.startsWith('/') || board.image.ref.startsWith('/')).length,
+    absolutePathRefs: boards.filter(
+      board =>
+        path.isAbsolute(board.schema.ref) ||
+        path.win32.isAbsolute(board.schema.ref) ||
+        path.isAbsolute(board.image.ref) ||
+        path.win32.isAbsolute(board.image.ref)
+    ).length,
     designWidths: Array.from(new Set(boards.map(board => board.designWidth).filter(Boolean))),
     imageWidths: Array.from(new Set(boards.map(board => board.image.width).filter(Boolean)))
   }
@@ -359,7 +552,7 @@ function renderIndex(report, dir) {
   lines.push('')
   lines.push('## 任务绑定说明')
   lines.push('')
-  lines.push('- Gate 2 前必须在任务卡中标明每个 UI 任务使用哪些画板。')
+  lines.push('- Plan Gate 前必须在任务卡中标明每个 UI 任务使用哪些画板。')
   lines.push('- 备份/复制画板默认视为范围问题；除非 PRD 或用户明确选择，不得直接绑定实现。')
   const schemaDir = path.join(maybeRelative(dir, summary.uiDir), 'schemas')
   lines.push(`- UI 编码必须 Sketch Data first：先读取对应 \`${schemaDir}/*.json\` 原文，并逐节点提取层级、坐标、尺寸、颜色、字体、圆角、阴影、图层和资源，再写实现。`)
@@ -369,8 +562,18 @@ function renderIndex(report, dir) {
   return `${lines.join('\n')}\n`
 }
 
-function updateHarnessState(dir, report) {
-  const statePath = path.join(dir, 'harness.state.json')
+function findPrimaryStatePath(dir) {
+  const root = requirementRoot(dir)
+  const candidates = Array.from(new Set([
+    path.join(dir, 'state.json'),
+    path.join(root, 'workbench', 'state.json')
+  ]))
+  return candidates.find(candidate => fs.existsSync(candidate)) || ''
+}
+
+function updatePrimaryState(dir, report) {
+  const statePath = findPrimaryStatePath(dir)
+  if (!statePath) return
   const state = readJson(statePath)
   if (!state) return
   writeJson(statePath, {
@@ -397,23 +600,32 @@ function updateHarnessState(dir, report) {
 }
 
 function main() {
-  const { requirementDir, flags } = parseArgs(process.argv)
+  let parsed
+  try {
+    parsed = parseArgs(process.argv.slice(2))
+  } catch (error) {
+    console.error(error.message)
+    process.exit(error.exitCode || 1)
+  }
+  const { requirementDir, flags } = parsed
+  if (parseBoolean(flags.help, false)) usage(0)
   if (!requirementDir) usage()
   const dir = path.resolve(process.cwd(), requirementDir)
 
   try {
     const report = buildInspection(dir, flags)
     if (parseBoolean(flags['write-index'], false)) {
-      const specsDir = path.join(dir, 'specs')
-      ensureDir(specsDir)
-      const indexPath = path.join(specsDir, 'ui-material-index.md')
-      fs.writeFileSync(indexPath, renderIndex(report, dir))
+      const indexPath = writeWorkbenchText(
+        dir,
+        path.join('specs', 'ui-material-index.md'),
+        renderIndex(report, dir)
+      )
       report.summary.indexPath = indexPath
     }
 
-    updateHarnessState(dir, report)
+    updatePrimaryState(dir, report)
 
-    if (flags.json) {
+    if (parseBoolean(flags.json, false)) {
       console.log(JSON.stringify(report, null, 2))
       return
     }

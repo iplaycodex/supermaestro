@@ -3,12 +3,12 @@
 ## 当前状态
 
 - 需求：
-- 阶段：Gate 1 pending
-- Gate 1 需求对齐：pending
-- Gate 2 计划确认：not-requested
+- 阶段：Scope pending
+- Scope 需求对齐：pending
+- Plan 计划确认：not-requested
 - Foundation Checkpoint：not-needed / pending / approved / changes-requested
-- Gate 3 Review：not-requested
-- Gate 4 Final：not-requested
+- Review：not-requested
+- Final：not-requested
 - 当前任务：
 - 最近更新：
 - 下一步：
@@ -22,6 +22,14 @@
 |  | planned |  |  |  |  |  |  | not-needed / investigating / resolved | pending / not-needed |  |
 
 状态建议：`planned`、`running`、`ready-for-agent-review`、`changes-requested`、`agent-approved`、`ready-for-human-review`、`human-approved`、`blocked`。
+
+## Worktree 登记投影
+
+本表仅便于人工审查，所有权以 `state.json` 的 owned registry 为准。
+
+| 任务 | Target | Branch | Base | Registry | 当前 Git 核验 | 最近检查 |
+| --- | --- | --- | --- | --- | --- | --- |
+|  |  |  |  | unregistered / owned / drifted / missing | pending |  |
 
 ## Checkpoints
 
@@ -58,16 +66,17 @@
 ## 验证进度
 
 区分静态检查、行为验证、构建验证和人工 UI 对比；不要用 parser/formatter 代替行为验证。
+worker target 结果标为 handoff；主 Gate 结果只记录单一 integration target。
 
-| 验证项 | 类型 | 状态 | 证据/备注 |
-| --- | --- | --- | --- |
-|  | static / behavior / build / ui-review | pending |  |
+| 验证项 | Target / Git root | Target identity / hash | Fan-in snapshot | 层级 | 类型 | 状态 | 证据/备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+|  |  |  |  | worker handoff / integration Gate | static / behavior / build / ui-review | pending |  |
 
-## Gate 4 收尾状态
+## Final 收尾状态
 
 | 项 | 状态 | 证据/备注 |
 | --- | --- | --- |
 | 环境判断 | normal repo / linked worktree / detached HEAD |  |
 | 最新验证 | pending / passed / failed |  |
 | 最终动作 | merge / PR / keep / discard / cleanup |  |
-| 清理范围 | pending / not-needed / safe / blocked |  |
+| 清理目标 | pending / not-needed / safe / blocked | 精确 `--target`；target/branch/HEAD/source fingerprint/clean 是否与授权快照匹配 |

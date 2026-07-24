@@ -1,41 +1,66 @@
-# Weapp Taro Lanhu Profile
+# 微信小程序 / Taro / 蓝湖 Profile
 
-Use this profile for WYWK Taro 3 mini-program / H5 requirements with Lanhu schema materials.
+适用于使用蓝湖 schema 物料的 Taro 3 微信小程序或 H5 需求。
 
-## UI Source Rules
+## UI 事实源
 
-- `source/ui/manifest.json` plus `source/ui/schemas/*.json` is the UI source of truth.
-- Images are optional baselines; missing images do not lower UI accuracy requirements.
-- When schema files exist, UI implementation must be schema-first.
-- Do not replace image-backed or complex visual nodes with CSS approximations unless the user explicitly accepts the degradation.
+- `source/ui/manifest.json` 与 `source/ui/schemas/*.json` 是 UI 主事实源。
+- 图片是可选视觉基线；图片缺失不代表可以降低 UI 准确度。
+- 存在 schema 时必须 schema-first 实现。
+- 未经用户明确接受，不把图片型或复杂视觉节点改成近似 CSS。
+- 蓝湖 Cookie、账号、令牌和私有地址不得写入仓库、manifest、报告或
+  evidence。
 
-## Required UI Artifacts
+## UI 编码前
 
-Before UI coding:
+必须具备：
 
 - `specs/ui-material-index.md`
 - `specs/ui-schema-extract.md`
-- Schema-to-implementation mapping table
-- Resource mapping for image-backed nodes
+- Schema 到实现映射表
+- 图片型节点的资源映射
 
-Before Review Gate:
+编码检查必须显式声明 UI 任务并提供 schema 提取；纯非 UI 任务要写清原因。
 
-- 视觉验证已通过显式 `--visual true` 启用；`strict + UI` 不会自动启用。
-- 每个必测画板/页面状态都有单独一条 `test.visual` evidence；blocked visual 也只能覆盖一个 case，并带 `--accepted-skip true --confirmed-by user --confirmation "<用户确认>"`。
-- Strong visual areas checked block by block.
-- Remaining UI risks listed in `reports/validation.md`.
+## Plan 与 Review
 
-使用结构化视觉回归时，在 contract 顶层声明 `sourceRoot`，用 `source-revision` 命令计算 `git-working-tree:<sha256>` 后写入 `sourceRevision`，并逐个声明画板/页面状态和 `purpose`。`verify` 会排除 workbench、现场重算 tracked + non-ignored untracked 源码指纹；源码变化即使视觉产物未变也会使 evidence 失效。非 blocked evidence 的 `expected` 必须指向 contract baseline 且 hash 匹配 `baselineHash`。固定 fixture 或 mock 只证明相应数据模式，不等同于 UAT 或真实业务链路。
+`strict + UI` 在 Plan Gate 必须明确视觉决策：
 
-## Taro Constraints
+- `required`：启用 `--visual true`，补齐 validation contract；
+- `not-applicable`：说明原因、剩余风险并由用户确认；
+- `blocked`：保持 Plan 未批准，先补基线或运行环境。
 
-- Read project `AGENTS.md`, `package.json`, app route config, and related page/server files before planning.
-- Follow existing Taro 3 / React 17 / Sass patterns.
-- For JSX class composition, prefer the project convention (`classnames` as required by the repo rules).
-- Platform differences should prefer platform files or existing `process.env.TARO_ENV` patterns.
+Review 前：
 
-## API and Mock Rules
+- 每个必测画板/页面状态各有一条 `test.visual` evidence；
+- actual、expected、diff 与对应 contract case 一一绑定；
+- 强视觉区域逐块核对；
+- `reports/validation.md` 写清剩余 UI 风险；
+- blocked visual 不能合并覆盖多个 case，跳过必须满足契约和人工接受条件。
 
-- Page-level API functions should live near the page in `server.js` unless the project already has a shared API module for that domain.
-- Mock and real API field mapping must be documented in `specs/api-spec.md`.
-- Login, phone binding, request concurrency, empty state, and stale response handling are high-risk review points.
+结构化视觉验证必须声明 `sourceRoot`，由 `source-revision` 计算当前
+`git-working-tree:<sha256>`。`verify` 会现场重算源码指纹并校验 baseline、
+actual、diff、报告及其 hash。固定 fixture 或 mock 只证明对应数据模式，
+不等同于 UAT 或真实链路。
+
+worktree 模式下，`sourceRoot` 必须指向 owned registry 中单一、live 的
+integration target，并与 `state.sourceRoot` 指向的目标源码属于同一个 Git
+仓库（同一 Git common dir；路径无需相同）。多 worktree 的 worker 截图和
+局部验证只进入 handoff；fan-in 后在 integration target 重跑主视觉验证，
+不得用其他仓库或未集成 worktree 的结果为 Review/Final 放行。
+
+## Taro 约束
+
+- 计划前读取项目 `AGENTS.md`、`package.json`、路由配置及相关页面/服务。
+- 沿用现有 Taro、React、Sass、组件和请求封装约定。
+- JSX class 拼接遵循目标项目现有工具与风格。
+- 平台差异优先沿用平台文件或项目已有 `process.env.TARO_ENV` 逻辑。
+
+## API 与 Mock
+
+- 页面级 API 默认放在目标项目既有页面服务层；已有领域共享 API 模块时复用。
+- Scope discovery 记录在 `specs/api-spec.md`；Plan 前把本期可执行字段、
+  异常态和兼容结论同步到 `specs/api-contract.md`。
+- 同时存在 API 与 UI 时维护 `specs/page-contract-matrix.md`。
+- Mock 与真实 API 的字段映射、数据模式和切换条件必须记录。
+- 登录、手机号绑定、权限、并发请求、空态、异常态和陈旧响应是高风险审查点。

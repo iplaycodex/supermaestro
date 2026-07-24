@@ -10,9 +10,11 @@
 
 ## 执行环境
 
-- Worktree：
+- Worktree target：
 - Branch：
-- Base commit：
+- Base：
+- Owned registry：registered；主控核验时间：
+- Dispatch check：`check --action dispatch-subagent --target "<path>"` 已通过
 - Foundation checkpoint commit：none / <commit>
 - 自动提交 feature：no
 - Foundation human-approved 后 checkpoint commit 授权：
@@ -35,10 +37,12 @@
 
 - Handoff：workbench/agents/<TASK-ID>/handoff.md
 - Review artifact：
-- 验证证据：
+- 局部验证证据：只写 handoff；不写主 validation contract/evidence
 - TDD 证据：RED 命令与失败原因、GREEN 命令与通过结果；如跳过或延后，写明原因、风险和补测动作。
 - 调试证据：复现步骤、错误信息、最近改动检查、根因假设、验证证据、最小修复和复验结果。
 - 不要修改主控工作台的 `plans/progress.md`、`agents/agent-index.md`、`worktrees/plan.md`、`reviews/review-packs.md` 或 `reports/validation.md`；这些由主控根据 handoff fan-in。
+- 不得自行登记、替换、收编或清理 worktree；target/branch/base 与 Git 不一致
+  时立即停止并通知主控。
 
 ## TDD 纪律
 

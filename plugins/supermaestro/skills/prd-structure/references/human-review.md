@@ -37,13 +37,13 @@
 4. 若已经生成 `$mission-control` 工作台，更新 `context.md`、`plans/task-plan.md`、`reviews/review-packs.md` 和 `reports/validation.md` 中受影响部分。
 5. 若已经编码，相关 review pack 标记 `changes-requested`，回到对应任务修复。
 
-## Gate 1 前最小审查清单
+## Scope Gate 前最小审查清单
 
-进入 `$mission-control` Gate 1 前，至少确认：
+进入 `$mission-control` Scope Gate 前，至少确认：
 
 - 所有 P0/P1 业务规则不是 `pending`。
 - 所有编码任务依赖的规则为 `accepted` 或 `corrected`。
-- 所有 `unclear` 都在 Gate 1 Brief 中出现。
+- 所有 `unclear` 都在 Scope Brief 中出现。
 - 结构化 PRD 中的接口和字段没有被当成真实接口事实，除非原文或 API 文档明确给出。
 - UI 任务不会只依赖 PRD 截图；如有 Lanhu/MasterGo schema，必须以后者为 UI source of truth。
 - review pack 可以追溯到结构化条目和原文 source_ref。

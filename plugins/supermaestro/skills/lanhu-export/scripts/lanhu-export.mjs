@@ -1,18 +1,13 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import os from 'node:os'
+import { realpathSync } from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const API_ORIGIN = 'https://lanhuapp.com'
 const API_BASE = `${API_ORIGIN}/api`
 const DDS_BASE = 'https://dds.lanhuapp.com/api'
-const DEFAULT_COOKIE_FILES = [
-  path.join(os.homedir(), '.codex/lanhu-cookie.txt'),
-  path.join(os.homedir(), '.codex/skills/lanhu-to-page/assets/cookie.txt')
-]
-
 function usage() {
   return `Usage:
   node lanhu-export.mjs --url <lanhu-stage-url> --group <group-name> --out <output-dir> [--cookie-file <path>]
@@ -23,18 +18,31 @@ Options:
   --out                         Output directory.
   --cookie-file                 File containing a Lanhu Cookie header value.
   --dry-run                     Build manifest only; skip schema and image downloads.
-  --with-images                 Also download images and write image_url/image_path in manifest.
+  --with-images                 Also download images and write local image_path values in manifest.
   --no-images                   Deprecated compatibility flag; images are skipped by default.
   --no-schema                   Skip schema downloads.
   --allow-fuzzy-group           Allow unique keyword match when exact group matching fails.
   --absolute-paths              Write absolute schema/image paths in manifest instead of relative paths.
   --include-all-if-group-empty  Allow whole-project export when group image lookup is empty.
+  --allow-partial               Exit successfully even when one or more boards failed to export.
   --help                        Show this message.
 `
 }
 
 function parseArgs(argv) {
   const args = {}
+  const booleanArgs = new Set([
+    'dry-run',
+    'with-images',
+    'no-images',
+    'no-schema',
+    'allow-fuzzy-group',
+    'absolute-paths',
+    'include-all-if-group-empty',
+    'allow-partial',
+    'help'
+  ])
+  const valueArgs = new Set(['url', 'group', 'out', 'cookie-file'])
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (!arg.startsWith('--')) {
@@ -42,18 +50,13 @@ function parseArgs(argv) {
     }
 
     const key = arg.slice(2)
-    if (
-      [
-        'dry-run',
-        'with-images',
-        'no-images',
-        'no-schema',
-        'allow-fuzzy-group',
-        'absolute-paths',
-        'include-all-if-group-empty',
-        'help'
-      ].includes(key)
-    ) {
+    if (!booleanArgs.has(key) && !valueArgs.has(key)) {
+      throw new Error(`Unknown option: --${key}`)
+    }
+    if (Object.prototype.hasOwnProperty.call(args, key)) {
+      throw new Error(`Duplicate option: --${key}`)
+    }
+    if (booleanArgs.has(key)) {
       args[key] = true
       continue
     }
@@ -69,7 +72,7 @@ function parseArgs(argv) {
 }
 
 function parseLanhuStageUrl(input) {
-  const url = new URL(input)
+  const url = trustedLanhuUrl(input, 'Lanhu stage URL')
   const hashQueryIndex = url.hash.indexOf('?')
   const hashParams = hashQueryIndex >= 0 ? new URLSearchParams(url.hash.slice(hashQueryIndex + 1)) : null
   const searchParams = url.searchParams
@@ -92,11 +95,9 @@ async function readCookie(args) {
     return pickCookieHeader(process.env.LANHU_COOKIE, 'LANHU_COOKIE')
   }
 
-  const cookieFile = args['cookie-file'] || DEFAULT_COOKIE_FILES.find(file => existsSync(file))
+  const cookieFile = args['cookie-file']
   if (!cookieFile) {
-    throw new Error(
-      `Lanhu Cookie is required. Set LANHU_COOKIE or pass --cookie-file. Checked: ${DEFAULT_COOKIE_FILES.join(', ')}`
-    )
+    throw new Error('Lanhu Cookie is required. Set LANHU_COOKIE or pass --cookie-file explicitly.')
   }
 
   const cookieText = await fs.readFile(cookieFile, 'utf8')
@@ -142,14 +143,60 @@ function pickCookieHeader(raw, source) {
   )
 }
 
+function isLanhuHostname(hostname) {
+  const normalized = String(hostname || '').toLowerCase()
+  return normalized === 'lanhuapp.com' || normalized.endsWith('.lanhuapp.com')
+}
+
+function redactUrl(input, base) {
+  try {
+    const url = input instanceof URL
+      ? new URL(input.href)
+      : new URL(String(input), base)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return url.href
+  } catch {
+    return '[redacted invalid URL]'
+  }
+}
+
+function trustedLanhuUrl(input, label = 'Lanhu URL') {
+  let url
+  try {
+    url = input instanceof URL ? new URL(input.href) : new URL(String(input))
+  } catch (error) {
+    throw new Error(`${label} is invalid.`)
+  }
+
+  const safeUrl = redactUrl(url)
+  if (url.protocol !== 'https:') {
+    throw new Error(`${label} must use HTTPS: ${safeUrl}`)
+  }
+  if (!isLanhuHostname(url.hostname)) {
+    throw new Error(`${label} must use lanhuapp.com or a dot-delimited subdomain: ${safeUrl}`)
+  }
+  if (url.username || url.password) {
+    throw new Error(`${label} must not contain URL credentials: ${safeUrl}`)
+  }
+  if (url.port && url.port !== '443') {
+    throw new Error(`${label} must use the default HTTPS port: ${safeUrl}`)
+  }
+
+  return url
+}
+
 function makeHeaders(cookie, url) {
+  const trustedUrl = trustedLanhuUrl(url)
   const headers = {
     Accept: 'application/json, text/plain, */*',
     Referer: `${API_ORIGIN}/web/`,
     'User-Agent': 'Mozilla/5.0 Codex Lanhu Exporter'
   }
 
-  if (cookie && new URL(url).hostname.endsWith('lanhuapp.com')) {
+  if (cookie && isLanhuHostname(trustedUrl.hostname)) {
     headers.Cookie = cookie
   }
 
@@ -161,16 +208,21 @@ async function fetchText(url, { cookie, method = 'GET', body } = {}) {
   const timeout = setTimeout(() => controller.abort(), 30000)
 
   try {
+    const safeUrl = redactUrl(url)
     const res = await fetch(url, {
       method,
       headers: makeHeaders(cookie, url),
       body,
+      redirect: 'manual',
       signal: controller.signal
     })
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location') || '(missing Location header)'
+      throw new Error(`Refusing redirect for ${safeUrl}: ${redactUrl(location, url)}`)
+    }
     const text = await res.text()
     if (!res.ok) {
-      const excerpt = text.replace(/\s+/g, ' ').slice(0, 240)
-      throw new Error(`HTTP ${res.status} for ${url}: ${excerpt}`)
+      throw new Error(`HTTP ${res.status} for ${safeUrl}`)
     }
     return { text, contentType: res.headers.get('content-type') || '' }
   } finally {
@@ -183,14 +235,19 @@ async function fetchBuffer(url, { cookie } = {}) {
   const timeout = setTimeout(() => controller.abort(), 30000)
 
   try {
+    const safeUrl = redactUrl(url)
     const res = await fetch(url, {
       headers: makeHeaders(cookie, url),
+      redirect: 'manual',
       signal: controller.signal
     })
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location') || '(missing Location header)'
+      throw new Error(`Refusing redirect for ${safeUrl}: ${redactUrl(location, url)}`)
+    }
     const arrayBuffer = await res.arrayBuffer()
     if (!res.ok) {
-      const excerpt = Buffer.from(arrayBuffer).toString('utf8').replace(/\s+/g, ' ').slice(0, 240)
-      throw new Error(`HTTP ${res.status} for ${url}: ${excerpt}`)
+      throw new Error(`HTTP ${res.status} for ${safeUrl}`)
     }
     return {
       buffer: Buffer.from(arrayBuffer),
@@ -202,30 +259,30 @@ async function fetchBuffer(url, { cookie } = {}) {
 }
 
 async function fetchJson(url, options = {}) {
+  const safeUrl = redactUrl(url)
   const { text } = await fetchText(url, options)
   const trimmed = text.trim()
   if (!trimmed) {
-    throw new Error(`Empty response from ${url}`)
+    throw new Error(`Empty response from ${safeUrl}`)
   }
   if (trimmed.startsWith('<')) {
-    throw new Error(`Lanhu returned HTML instead of JSON for ${url}; refresh the Cookie.`)
+    throw new Error(`Lanhu returned HTML instead of JSON for ${safeUrl}; refresh the Cookie.`)
   }
 
   let json
   try {
     json = JSON.parse(trimmed)
   } catch (error) {
-    throw new Error(`Invalid JSON from ${url}: ${trimmed.slice(0, 240)}`)
+    throw new Error(`Invalid JSON from ${safeUrl}`)
   }
 
   if (typeof json === 'string') {
-    throw new Error(`${json} (${url})`)
+    throw new Error(`Lanhu API returned an unexpected string for ${safeUrl}`)
   }
 
   const code = json?.code || json?.status_code
   if (code && !['00000', '0', 0, 200, '200'].includes(code)) {
-    const message = json.message || json.msg || json.error || 'Lanhu API error'
-    throw new Error(`${message} (${code}) for ${url}`)
+    throw new Error(`Lanhu API error (${code}) for ${safeUrl}`)
   }
 
   return json
@@ -542,9 +599,10 @@ function collectUrls(obj) {
 
 function normalizeUrl(url) {
   if (!url) return ''
-  if (url.startsWith('//')) return `https:${url}`
-  if (url.startsWith('/')) return `${API_ORIGIN}${url}`
-  return url
+  let normalized = String(url).trim()
+  if (normalized.startsWith('//')) normalized = `https:${normalized}`
+  if (normalized.startsWith('/')) normalized = `${API_ORIGIN}${normalized}`
+  return trustedLanhuUrl(normalized, 'Lanhu resource URL').href
 }
 
 function extractImageUrl(detail) {
@@ -670,8 +728,8 @@ async function fetchSchemaInfo({ cookie, versionId }) {
   return unwrapPayload(await fetchJson(url, { cookie }))
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2))
+async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv)
   if (args.help) {
     console.log(usage())
     return
@@ -737,7 +795,7 @@ async function main() {
 
   const manifest = {
     source: {
-      url: args.url,
+      origin: API_ORIGIN,
       team_id: tid,
       project_id: pid,
       group_name: groupMatch.matchedName || args.group,
@@ -760,12 +818,10 @@ async function main() {
       source: ref.source,
       version_id: '',
       versions: [],
-      schema_url: '',
       schema_path: '',
       errors: []
     }
     if (withImages) {
-      record.image_url = ''
       record.image_path = ''
     }
 
@@ -774,9 +830,7 @@ async function main() {
       record.name = record.name || findFirstByKeys(detail, ['name', 'title', 'image_name', 'imageName'])
       record.version_id = extractVersionId(detail)
       record.versions = extractVersions(detail)
-      if (withImages) {
-        record.image_url = extractImageUrl(detail)
-      }
+      const imageUrl = withImages ? extractImageUrl(detail) : ''
 
       const baseName = `${ordinal}-${safeFilename(record.name, record.image_id)}`
 
@@ -785,12 +839,12 @@ async function main() {
           record.errors.push('Missing version_id; schema download skipped.')
         } else {
           const schemaInfo = await fetchSchemaInfo({ cookie, versionId: record.version_id })
-          record.schema_url = schemaInfo.data_resource_url || schemaInfo.resource_url || schemaInfo.url || ''
-          if (!record.schema_url) {
+          const schemaUrl = schemaInfo.data_resource_url || schemaInfo.resource_url || schemaInfo.url || ''
+          if (!schemaUrl) {
             record.errors.push('Missing data_resource_url from store_schema_revise.')
           } else {
             const schemaPath = await downloadJson(
-              record.schema_url,
+              schemaUrl,
               path.join(schemasDir, `${baseName}.json`),
               cookie
             )
@@ -800,11 +854,11 @@ async function main() {
       }
 
       if (!args['dry-run'] && withImages) {
-        if (!record.image_url) {
+        if (!imageUrl) {
           record.errors.push('Missing downloadable image URL; image download skipped.')
         } else {
           const imagePath = await downloadBinary(
-            record.image_url,
+            imageUrl,
             path.join(imagesDir, baseName),
             cookie
           )
@@ -822,23 +876,46 @@ async function main() {
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
 
   const failed = manifest.images.filter(item => item.errors.length)
-  console.log(
-    JSON.stringify(
-      {
-        manifest: manifestPath,
-        total: manifest.images.length,
-        failed: failed.length,
-        schemaDownloaded: manifest.images.filter(item => item.schema_path).length,
-        imagesRequested: withImages,
-        imageDownloaded: manifest.images.filter(item => item.image_path).length
-      },
-      null,
-      2
+  const summary = {
+    manifest: manifestPath,
+    total: manifest.images.length,
+    failed: failed.length,
+    schemaDownloaded: manifest.images.filter(item => item.schema_path).length,
+    imagesRequested: withImages,
+    imageDownloaded: manifest.images.filter(item => item.image_path).length,
+    partialAllowed: Boolean(args['allow-partial'])
+  }
+  console.log(JSON.stringify(summary, null, 2))
+
+  if (failed.length && !args['allow-partial']) {
+    const error = new Error(
+      `${failed.length} of ${manifest.images.length} board(s) failed. ` +
+        'Inspect manifest.json, then retry or pass --allow-partial to accept an incomplete export explicitly.'
     )
-  )
+    error.exitCode = 2
+    error.summary = summary
+    throw error
+  }
+
+  return summary
 }
 
-main().catch(error => {
-  console.error(error.message)
-  process.exitCode = 1
-})
+const invokedAsScript =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(path.resolve(process.argv[1]))).href
+
+if (invokedAsScript) {
+  main().catch(error => {
+    console.error(error.message)
+    process.exitCode = error.exitCode || 1
+  })
+}
+
+export {
+  isLanhuHostname,
+  main,
+  makeHeaders,
+  normalizeUrl,
+  parseLanhuStageUrl,
+  trustedLanhuUrl
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "SuperMaestro"
+  short_description: "把需求物料整理为可审查、可恢复的研发工作台"
+  default_prompt: "使用 $requirement-workbench 接收这个需求，按复杂度选择工作流与执行模式，并在 Scope、Plan、Review、Final Gate 前停下等待用户确认。"

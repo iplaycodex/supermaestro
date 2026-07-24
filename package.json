@@ -1,15 +1,27 @@
 {
   "name": "supermaestro",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Requirement intake and mission-control workflow suite for Codex.",
+  "description": "面向 Codex 的需求接收、任务编排与验证工作流插件。",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=18"
   },
+  "files": [
+    ".agents/plugins/marketplace.json",
+    "plugins/supermaestro/.codex-plugin/plugin.json",
+    "plugins/supermaestro/agents/",
+    "plugins/supermaestro/profiles/",
+    "plugins/supermaestro/scripts/",
+    "plugins/supermaestro/skills/",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
-    "lint:syntax": "node --check plugins/supermaestro/scripts/supermaestro.js && node --check plugins/supermaestro/scripts/validation-evidence.js && node --check plugins/supermaestro/scripts/source-fingerprint.js && node --check plugins/supermaestro/skills/mission-control/scripts/harness.js && node --check plugins/supermaestro/skills/mission-control/scripts/check-reviewability.js && node --check plugins/supermaestro/skills/mission-control/scripts/inspect-ui.js && node --check plugins/supermaestro/skills/lanhu-export/scripts/lanhu-export.mjs",
-    "test": "npm run lint:syntax && node tests/supermaestro-smoke.test.js && node tests/supermaestro-v2-smoke.test.js && node tests/supermaestro-strict-contracts.test.js && node tests/supermaestro-validation-evidence.test.js && node plugins/supermaestro/skills/mission-control/scripts/harness.test.js && node plugins/supermaestro/skills/mission-control/scripts/check-reviewability.test.js"
+    "lint:syntax": "node --check plugins/supermaestro/scripts/supermaestro.js && node --check plugins/supermaestro/scripts/validation-evidence.js && node --check plugins/supermaestro/scripts/source-fingerprint.js && node --check plugins/supermaestro/skills/mission-control/scripts/harness.js && node --check plugins/supermaestro/skills/mission-control/scripts/check-reviewability.js && node --check plugins/supermaestro/skills/mission-control/scripts/inspect-ui.js && node --check plugins/supermaestro/skills/mission-control/scripts/scaffold-execution-mode.js && node --check plugins/supermaestro/skills/lanhu-export/scripts/lanhu-export.mjs",
+    "validate:versions": "node -e \"const fs=require('fs');const pkg=require('./package.json');const manifest=JSON.parse(fs.readFileSync('plugins/supermaestro/.codex-plugin/plugin.json','utf8'));if(pkg.version!==manifest.version){throw new Error('package.json 与 plugin.json 版本不一致: '+pkg.version+' != '+manifest.version)}console.log('版本一致: '+pkg.version)\"",
+    "test": "npm run lint:syntax && npm run validate:versions && node tests/repository-integrity.test.js && node tests/supermaestro-smoke.test.js && node tests/supermaestro-v2-smoke.test.js && node tests/supermaestro-strict-contracts.test.js && node tests/supermaestro-validation-evidence.test.js && node tests/validation-evidence-path-security.test.js && node tests/supermaestro-path-security.test.js && node tests/supermaestro-workflow-migration.test.js && node tests/supermaestro-worktree-registry.test.js && node plugins/supermaestro/skills/mission-control/scripts/harness.test.js && node plugins/supermaestro/skills/mission-control/scripts/check-reviewability.test.js && node plugins/supermaestro/skills/lanhu-export/scripts/lanhu-export.security.test.mjs && node plugins/supermaestro/skills/mission-control/scripts/inspect-ui.security.test.js"
   },
   "bin": {
     "supermaestro": "plugins/supermaestro/scripts/supermaestro.js",

@@ -4,15 +4,77 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  validate:
+    name: 插件与 Skill 结构校验
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 获取官方插件校验器
+        uses: actions/checkout@v4
+        with:
+          repository: openai/codex
+          ref: 81da9deb065d7adb283816b19b40f89bcc484276
+          path: .ci/openai-codex
+          sparse-checkout: codex-rs/skills/src/assets/samples/plugin-creator/scripts/validate_plugin.py
+          sparse-checkout-cone-mode: false
+
+      - name: 获取官方 Skill 校验器
+        uses: actions/checkout@v4
+        with:
+          repository: openai/skills
+          ref: 49f948faa9258a0c61caceaf225e179651397431
+          path: .ci/openai-skills
+          sparse-checkout: skills/.system/skill-creator/scripts/quick_validate.py
+          sparse-checkout-cone-mode: false
+
+      - name: 安装校验器依赖
+        run: python -m pip install --disable-pip-version-check "PyYAML==6.0.2"
+
+      - name: 校验插件 manifest
+        run: python .ci/openai-codex/codex-rs/skills/src/assets/samples/plugin-creator/scripts/validate_plugin.py plugins/supermaestro
+
+      - name: 校验全部 Skill
+        run: python -c "from pathlib import Path; import subprocess, sys; validator=Path('.ci/openai-skills/skills/.system/skill-creator/scripts/quick_validate.py'); skills=sorted(p for p in Path('plugins/supermaestro/skills').iterdir() if p.is_dir()); [subprocess.run([sys.executable, str(validator), str(skill)], check=True) for skill in skills]"
+
+      - name: 校验版本一致性
+        run: npm run validate:versions
+
+  test:
+    name: Node ${{ matrix.node-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        node-version:
+          - 18
+          - 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
       - run: npm test

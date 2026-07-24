@@ -6,6 +6,10 @@ const TEST_EVIDENCE_TYPES = new Set(['test.e2e', 'test.visual']);
 const TEST_RESULTS = new Set(['passed', 'failed', 'blocked']);
 const DATA_MODES = new Set(['fixture', 'mock-api', 'uat', 'real']);
 const VISUAL_PURPOSES = new Set(['design-conformance', 'regression']);
+const EVIDENCE_REF_POLICIES = Object.freeze({
+  WORKBENCH: 'workbench',
+  VISUAL_BASELINE: 'visual-baseline'
+});
 
 function createValidationContract(triggers = {}) {
   return {
@@ -158,11 +162,9 @@ function createTestEvidenceEntry(options = {}, metadata = {}) {
 function recordTestEvidenceArtifactHashes(entry, workbench) {
   if (entry.result === 'blocked') return entry;
   const artifactHashes = {};
-  for (const ref of testEvidenceArtifactRefs(entry)) {
-    if (!isExistingFile(workbench, ref)) {
-      throw new Error(`${entry.type} evidence artifact does not exist or is empty: ${ref}.`);
-    }
-    artifactHashes[ref] = sha256File(resolveFile(workbench, ref));
+  for (const descriptor of testEvidenceArtifactDescriptors(entry)) {
+    const file = resolveEvidenceFileRef(workbench, descriptor.ref, descriptor.policy);
+    artifactHashes[descriptor.ref] = sha256File(file);
   }
   entry.artifactHashes = artifactHashes;
   return entry;
@@ -284,7 +286,13 @@ function validateContractCases(issues, kind, cases) {
   });
 }
 
-function collectValidationEvidenceIssues({ workbench, triggers = {}, contract, evidence = [] }) {
+function collectValidationEvidenceIssues({
+  workbench,
+  triggers = {},
+  contract,
+  evidence = [],
+  verificationTargetHash = ''
+}) {
   if (triggers.e2e !== true && triggers.visual !== true) return [];
 
   const issues = collectValidationContractIssues(contract, triggers);
@@ -307,7 +315,8 @@ function collectValidationEvidenceIssues({ workbench, triggers = {}, contract, e
       contractSection: contract.e2e,
       evidence,
       contractHash,
-      sourceRevision: contract.sourceRevision
+      sourceRevision: contract.sourceRevision,
+      verificationTargetHash
     });
   }
   if (triggers.visual === true) {
@@ -317,7 +326,8 @@ function collectValidationEvidenceIssues({ workbench, triggers = {}, contract, e
       contractSection: contract.visual,
       evidence,
       contractHash,
-      sourceRevision: contract.sourceRevision
+      sourceRevision: contract.sourceRevision,
+      verificationTargetHash
     });
   }
   return issues;
@@ -325,7 +335,15 @@ function collectValidationEvidenceIssues({ workbench, triggers = {}, contract, e
 
 function validateEvidenceKind(
   issues,
-  { workbench, kind, contractSection, evidence, contractHash, sourceRevision }
+  {
+    workbench,
+    kind,
+    contractSection,
+    evidence,
+    contractHash,
+    sourceRevision,
+    verificationTargetHash
+  }
 ) {
   const type = `test.${kind}`;
   const entries = evidence.filter(entry => entry?.type === type);
@@ -354,18 +372,36 @@ function validateEvidenceKind(
       testCase,
       contractSection,
       contractHash,
-      sourceRevision
+      sourceRevision,
+      verificationTargetHash
     });
   }
 }
 
 function validateStoredEntry(
   issues,
-  { workbench, kind, entry, testCase, contractSection, contractHash, sourceRevision }
+  {
+    workbench,
+    kind,
+    entry,
+    testCase,
+    contractSection,
+    contractHash,
+    sourceRevision,
+    verificationTargetHash
+  }
 ) {
   const type = `test.${kind}`;
   if (entry.contractHash !== contractHash) {
     issues.push(`${type} evidence contractHash does not match the current validation contract.`);
+  }
+  if (
+    verificationTargetHash &&
+    entry.verificationTargetHash !== verificationTargetHash
+  ) {
+    issues.push(
+      `${type} evidence target/registry identity does not match the current integration target.`
+    );
   }
   if (entry.platform !== testCase.platform || entry.dataMode !== testCase.dataMode) {
     issues.push(`${type} evidence platform/dataMode does not match contract case ${testCase.id}.`);
@@ -403,15 +439,21 @@ function validateStoredEntry(
   const artifacts = Array.isArray(entry.artifacts) ? entry.artifacts : [];
   if (!artifacts.length) issues.push(`${type} passed evidence requires artifacts.`);
   for (const artifact of artifacts) {
-    if (!isExistingFile(workbench, artifact)) {
-      issues.push(`${type} artifact does not exist: ${artifact}.`);
-    }
+    validateStoredEvidenceRef(
+      issues,
+      workbench,
+      artifact,
+      `${type} artifact`,
+      EVIDENCE_REF_POLICIES.WORKBENCH
+    );
   }
-  for (const [label, ref] of [['report', entry.report]]) {
-    if (!isExistingFile(workbench, ref)) {
-      issues.push(`${type} ${label} does not exist: ${ref || '-'}.`);
-    }
-  }
+  validateStoredEvidenceRef(
+    issues,
+    workbench,
+    entry.report,
+    `${type} report`,
+    EVIDENCE_REF_POLICIES.WORKBENCH
+  );
   if (!Number.isInteger(entry.exitCode) || entry.exitCode !== 0) {
     issues.push(`${type} passed evidence must have exitCode 0.`);
   }
@@ -422,26 +464,47 @@ function validateStoredEntry(
   }
 
   if (kind === 'visual') {
-    if (!isExistingFile(workbench, entry.baselineManifest)) {
-      issues.push(`test.visual baseline manifest does not exist: ${entry.baselineManifest || '-'}.`);
-    }
-    if (!isExistingFile(workbench, testCase.baseline)) {
-      issues.push(`test.visual baseline does not exist for case ${testCase.id}: ${testCase.baseline}.`);
-    } else {
-      const actualHash = sha256File(resolveFile(workbench, testCase.baseline));
+    validateStoredEvidenceRef(
+      issues,
+      workbench,
+      entry.baselineManifest,
+      'test.visual baseline manifest',
+      EVIDENCE_REF_POLICIES.VISUAL_BASELINE
+    );
+    const baselineFile = validateStoredEvidenceRef(
+      issues,
+      workbench,
+      testCase.baseline,
+      `test.visual baseline for case ${testCase.id}`,
+      EVIDENCE_REF_POLICIES.VISUAL_BASELINE
+    );
+    if (baselineFile) {
+      const actualHash = sha256File(baselineFile);
       if (actualHash !== String(testCase.baselineHash).toLowerCase()) {
         issues.push(`test.visual baseline hash does not match contract case ${testCase.id}.`);
       }
     }
-    for (const [label, ref] of [
-      ['actual', entry.actual],
-      ['expected', entry.expected],
-      ['diff', entry.diff]
-    ]) {
-      if (!isExistingFile(workbench, ref)) {
-        issues.push(`test.visual ${label} does not exist: ${ref || '-'}.`);
-      }
-    }
+    validateStoredEvidenceRef(
+      issues,
+      workbench,
+      entry.actual,
+      'test.visual actual',
+      EVIDENCE_REF_POLICIES.WORKBENCH
+    );
+    const expectedFile = validateStoredEvidenceRef(
+      issues,
+      workbench,
+      entry.expected,
+      'test.visual expected',
+      EVIDENCE_REF_POLICIES.VISUAL_BASELINE
+    );
+    validateStoredEvidenceRef(
+      issues,
+      workbench,
+      entry.diff,
+      'test.visual diff',
+      EVIDENCE_REF_POLICIES.WORKBENCH
+    );
     const maskedRatio = Number(entry.maskedRatio || 0);
     if (maskedRatio > 0 && !String(entry.maskReason || '').trim()) {
       issues.push(`test.visual masked case ${testCase.id} requires a mask reason.`);
@@ -458,12 +521,9 @@ function validateStoredEntry(
     if (entry.purpose !== testCase.purpose) {
       issues.push(`test.visual purpose does not match contract case ${testCase.id}.`);
     }
-    if (!isSameFileRef(workbench, entry.expected, testCase.baseline)) {
+    if (!expectedFile || !baselineFile || expectedFile !== baselineFile) {
       issues.push(`test.visual expected does not match contract baseline for case ${testCase.id}.`);
-    } else if (
-      isExistingFile(workbench, entry.expected) &&
-      sha256File(resolveFile(workbench, entry.expected)) !== String(testCase.baselineHash).toLowerCase()
-    ) {
+    } else if (sha256File(expectedFile) !== String(testCase.baselineHash).toLowerCase()) {
       issues.push(`test.visual expected hash does not match contract case ${testCase.id}.`);
     }
     if (entry.baselineHash !== String(testCase.baselineHash).toLowerCase()) {
@@ -482,46 +542,199 @@ function validateStoredEntry(
 
 function validateStoredArtifactHashes(issues, workbench, entry) {
   const hashes = entry.artifactHashes;
-  for (const ref of testEvidenceArtifactRefs(entry)) {
-    const expectedHash = hashes && hashes[ref];
+  for (const descriptor of testEvidenceArtifactDescriptors(entry)) {
+    const expectedHash = hashes && hashes[descriptor.ref];
     if (!isSha256(expectedHash)) {
-      issues.push(`${entry.type} evidence artifact hash is missing or invalid: ${ref}.`);
+      issues.push(
+        `${entry.type} evidence artifact hash is missing or invalid: ${descriptor.ref}.`
+      );
       continue;
     }
-    if (isExistingFile(workbench, ref)) {
-      const actualHash = sha256File(resolveFile(workbench, ref));
+    const file = tryResolveEvidenceFileRef(workbench, descriptor.ref, descriptor.policy);
+    if (file) {
+      const actualHash = sha256File(file);
       if (actualHash !== String(expectedHash).toLowerCase()) {
-        issues.push(`${entry.type} evidence artifact hash changed after execution: ${ref}.`);
+        issues.push(
+          `${entry.type} evidence artifact hash changed after execution: ${descriptor.ref}.`
+        );
       }
     }
   }
 }
 
-function testEvidenceArtifactRefs(entry) {
-  const refs = [...(Array.isArray(entry.artifacts) ? entry.artifacts : []), entry.report];
+function testEvidenceArtifactDescriptors(entry) {
+  const descriptors = [
+    ...(Array.isArray(entry.artifacts) ? entry.artifacts : []).map(ref => ({
+      ref,
+      policy: EVIDENCE_REF_POLICIES.WORKBENCH
+    })),
+    {
+      ref: entry.report,
+      policy: EVIDENCE_REF_POLICIES.WORKBENCH
+    }
+  ];
   if (entry.type === 'test.visual') {
-    refs.push(entry.baselineManifest, entry.actual, entry.expected, entry.diff);
+    descriptors.push(
+      {
+        ref: entry.baselineManifest,
+        policy: EVIDENCE_REF_POLICIES.VISUAL_BASELINE
+      },
+      {
+        ref: entry.actual,
+        policy: EVIDENCE_REF_POLICIES.WORKBENCH
+      },
+      {
+        ref: entry.expected,
+        policy: EVIDENCE_REF_POLICIES.VISUAL_BASELINE
+      },
+      {
+        ref: entry.diff,
+        policy: EVIDENCE_REF_POLICIES.WORKBENCH
+      }
+    );
   }
-  return Array.from(new Set(refs.map(ref => String(ref || '').trim()).filter(Boolean)));
+  const unique = new Map();
+  for (const descriptor of descriptors) {
+    const ref = String(descriptor.ref || '').trim();
+    if (!ref) continue;
+    unique.set(`${descriptor.policy}\0${ref}`, { ...descriptor, ref });
+  }
+  return Array.from(unique.values());
 }
 
-function isExistingFile(workbench, ref) {
+function validateStoredEvidenceRef(issues, workbench, ref, label, policy) {
+  try {
+    return resolveEvidenceFileRef(workbench, ref, policy);
+  } catch (error) {
+    issues.push(`${label} reference is invalid: ${error.message}`);
+    return '';
+  }
+}
+
+function tryResolveEvidenceFileRef(workbench, ref, policy) {
+  try {
+    return resolveEvidenceFileRef(workbench, ref, policy);
+  } catch {
+    return '';
+  }
+}
+
+function resolveEvidenceFileRef(workbench, ref, policy) {
   const value = String(ref || '').trim();
-  if (!value) return false;
-  const file = path.isAbsolute(value) ? value : path.join(workbench, value);
-  return fs.existsSync(file) && fs.statSync(file).isFile() && fs.statSync(file).size > 0;
+  if (!value) throw new Error('path is empty.');
+  if (
+    value.includes('\0') ||
+    path.isAbsolute(value) ||
+    path.win32.isAbsolute(value) ||
+    /^[a-z][a-z0-9+.-]*:/i.test(value)
+  ) {
+    throw new Error(`path must be relative: ${value}.`);
+  }
+
+  const workbenchRoot = path.resolve(workbench);
+  const requirementRoot = path.basename(workbenchRoot) === 'workbench'
+    ? path.dirname(workbenchRoot)
+    : workbenchRoot;
+  const portableRef = value.replace(/[\\/]+/g, path.sep);
+  const candidate = path.resolve(workbenchRoot, portableRef);
+  const allowedRoots = policy === EVIDENCE_REF_POLICIES.VISUAL_BASELINE
+    ? [
+        {
+          root: path.join(requirementRoot, 'source', 'ui'),
+          symlinkBase: requirementRoot
+        },
+        {
+          root: path.join(requirementRoot, 'input', 'ui'),
+          symlinkBase: requirementRoot
+        },
+        {
+          root: path.join(workbenchRoot, 'ui'),
+          symlinkBase: workbenchRoot
+        }
+      ]
+    : [
+        {
+          root: workbenchRoot,
+          symlinkBase: workbenchRoot
+        }
+      ];
+  const allowed = allowedRoots.find(item => isPathInside(item.root, candidate));
+  if (!allowed) {
+    const scope = policy === EVIDENCE_REF_POLICIES.VISUAL_BASELINE
+      ? 'requirement source/ui, input/ui, or workbench/ui'
+      : 'workbench';
+    throw new Error(`path must stay inside ${scope}: ${value}.`);
+  }
+
+  assertNoSymbolicLink(allowed.symlinkBase, candidate, value);
+
+  let fileStat;
+  try {
+    fileStat = fs.lstatSync(candidate);
+  } catch {
+    throw new Error(`file does not exist: ${value}.`);
+  }
+  if (!fileStat.isFile()) {
+    throw new Error(`path must reference a regular file: ${value}.`);
+  }
+  if (fileStat.size === 0) {
+    throw new Error(`file is empty: ${value}.`);
+  }
+
+  let realRoot;
+  let realFile;
+  try {
+    realRoot = fs.realpathSync(allowed.root);
+    realFile = fs.realpathSync(candidate);
+  } catch {
+    throw new Error(`file cannot be resolved: ${value}.`);
+  }
+  if (!isPathInside(realRoot, realFile)) {
+    throw new Error(`resolved path escapes the allowed root: ${value}.`);
+  }
+  return realFile;
 }
 
-function isSameFileRef(workbench, left, right) {
-  const leftValue = String(left || '').trim();
-  const rightValue = String(right || '').trim();
-  if (!leftValue || !rightValue) return false;
-  return path.resolve(workbench, leftValue) === path.resolve(workbench, rightValue);
+function isPathInside(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return (
+    relative === '' ||
+    (
+      !relative.startsWith(`..${path.sep}`) &&
+      relative !== '..' &&
+      !path.isAbsolute(relative)
+    )
+  );
 }
 
-function resolveFile(workbench, ref) {
-  const value = String(ref || '').trim();
-  return path.isAbsolute(value) ? value : path.join(workbench, value);
+function assertNoSymbolicLink(base, candidate, ref) {
+  const basePath = path.resolve(base);
+  const relative = path.relative(basePath, candidate);
+  if (
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`path escapes its allowed root: ${ref}.`);
+  }
+
+  const segments = relative ? relative.split(path.sep).filter(Boolean) : [];
+  let current = basePath;
+  const paths = [current];
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    paths.push(current);
+  }
+  for (const currentPath of paths) {
+    try {
+      if (fs.lstatSync(currentPath).isSymbolicLink()) {
+        throw new Error(`path must not contain symbolic links: ${ref}.`);
+      }
+    } catch (error) {
+      if (error && /symbolic links/.test(error.message)) throw error;
+      throw new Error(`file does not exist: ${ref}.`);
+    }
+  }
 }
 
 function sha256File(file) {

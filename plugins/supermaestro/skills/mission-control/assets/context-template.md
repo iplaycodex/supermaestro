@@ -21,6 +21,7 @@
 | schema 提取 | specs/ui-schema-extract.md | UI 实现依据 |  |
 | Mock/API |  | 接口契约 |  |
 | API 规格 | specs/api-spec.md | 接口清单、入参出参、数据模型、mock 场景 |  |
+| API 可执行契约 | specs/api-contract.md | 本期实现、异常态与兼容结论 |  |
 | 页面契约矩阵 | specs/page-contract-matrix.md | 页面、UI、API/mock、RP 绑定关系 |  |
 | 相关代码 |  | 现有实现约定 |  |
 
@@ -52,6 +53,7 @@
 - 相关页面/组件：
 - 相关接口/mock：
 - 接口规格：
+- API 可执行契约：
 - 路由/分包：
 - 鉴权/权限：
 - 埋点/日志：

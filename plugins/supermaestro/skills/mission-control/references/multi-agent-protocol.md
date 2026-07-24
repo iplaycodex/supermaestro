@@ -1,6 +1,8 @@
 # 多 Agent 协作协议
 
-只有 Gate 2 `allowSubagents=true` 且确实派发真实外部 agent/thread 时读取并执行本协议。不开真实子 agent 时，不生成或维护本协议相关 agent 文档。
+Plan Gate 记录 `state.execution.subagents=true` 并派发真实 worker，或独立启用
+`state.execution.reviewAgent=true` 审查真实 RP/diff 时，读取本协议对应部分。
+不开 worker 就不生成 worker brief/handoff，但仍可只生成 review-agent 记录。
 
 ## 角色
 
@@ -8,7 +10,7 @@
 - Foundation agent：实现拆小后的公共底座，如 service/mock、scheme/路由、公共组件、基础测试中的一个或少数相邻契约面；不得把所有公共工作合成一个上帝任务。
 - Feature agent：只实现任务卡内页面或模块，消费 foundation 契约，不擅自改公共底座。
 - Review agent：只读审查某个 review pack 的 diff/patch、验证证据和风险，不修改源码，不提交。
-- Integration agent 或主控：合并各分支，处理冲突，跑总验证，更新 Gate 2 材料。
+- Integration agent 或主控：按用户授权合并各分支、处理冲突、跑总验证，并更新 Review/Final 材料。
 
 ## 执行分层
 
@@ -19,8 +21,20 @@ Mission Control 同时负责主控流程和 worker 执行纪律：
 - 编码 worker 必须按任务卡记录 TDD 适用性；只有标记 `not-applicable` 或 `deferred` 时才可跳过，并且必须写明原因。
 - worker 遇到 bug、测试失败、构建失败、联调异常或行为 review finding 时，先记录复现和根因，再做最小修复并复验。
 - review agent 只接收冻结的 review pack；changes-requested 修复前先核实 finding，再逐项处理或给出有证据的技术性驳回。
-- Gate 3/Gate 4 和任何完成声明前必须重新运行验证；Gate 4 按用户授权的交付与清理动作收尾。
+- Review/Final Gate 和任何完成声明前必须重新运行验证；Final 只按用户明确授权的交付与清理动作收尾。
 - 不开 subagent、跨会话或串行执行已有计划时，由主控直接按任务计划推进。
+
+worktree 模式下，主控必须先用 Plan 中的精确 `target/branch/base` 完成创建
+意图检查、调用方 `git worktree add` 和 `register-worktree`。目标进入 owned
+registry 后，才可执行：
+
+```bash
+node <plugin-root>/scripts/supermaestro.js check <workbench> --action sync-materials --target "<path>"
+node <plugin-root>/scripts/supermaestro.js check <workbench> --action dispatch-subagent --target "<path>"
+```
+
+任一步缺少 `--target`，或目标未登记、已漂移、不存在，都不得启动 agent。
+CLI 只校验和登记，不自行创建或删除 worktree。
 
 ## Foundation-first
 
@@ -28,7 +42,9 @@ Mission Control 同时负责主控流程和 worker 执行纪律：
 
 1. Foundation 任务完成并形成 review artifact。
 2. 主控请求用户进行 Foundation Review Checkpoint，确认公共契约稳定。
-3. Foundation human-approved 后，如下游依赖该代码，先创建本地 checkpoint commit，并记录 base commit。
+3. Foundation human-approved 后，如下游依赖该代码，先对已登记目标执行
+   `check --action checkpoint-commit --target "<path>"`，再由调用方创建本地
+   checkpoint commit 并记录 base commit。
 4. Feature agents 基于已确认的 foundation checkpoint commit 启动，保证后续 P-only diff 干净。
 5. 如果 feature 发现公共契约不够用，提交 contract-change request，不直接改公共文件。
 
@@ -53,9 +69,9 @@ Mission Control 同时负责主控流程和 worker 执行纪律：
 - `merged`
 - `abandoned`
 
-主控工作台里的 `workbench/plans/progress.md` 是任务状态唯一事实源，记录每个任务的 owner、worktree、branch、base commit、latest diff/patch、updated_at、blocker、validation。不要创建或维护 `tasks/state.json`。
+主控工作台里的 `workbench/plans/progress.md` 是任务状态的人类投影，记录每个任务的 owner、worktree、branch、base commit、latest diff/patch、updated_at、blocker、validation；`state.json` 的 owned registry 才是 worktree 所有权机器依据。不要创建或维护 `tasks/state.json`。
 
-多 worktree 下必须区分“本任务产物”和“全局状态”：worker worktree 里的 `workbench` 文件不会自动同步回主控工作台。编码 worker 不得直接修改主控工作台的 `plans/progress.md`、`agents/agent-index.md`、`worktrees/plan.md`、`reviews/review-packs.md` 或 `reports/validation.md`；它只写自己的 handoff 和验证记录。主控读取 handoff、diff 和验证记录后，统一 fan-in 回主控工作台。
+多 worktree 下必须区分“本任务产物”和“全局状态”：worker worktree 里的 `workbench` 文件不会自动同步回主控工作台。编码 worker 不得直接修改主控工作台的 `plans/progress.md`、`agents/agent-index.md`、`worktrees/plan.md`、`reviews/review-packs.md` 或 `reports/validation.md`；它只写自己的 handoff 和局部验证记录。主控读取 handoff、diff 和验证记录后，统一 fan-in 回主控工作台。局部结果不能直接作为 Review/Final 主 evidence。
 
 ## Agent 启动包
 
@@ -65,7 +81,7 @@ Mission Control 同时负责主控流程和 worker 执行纪律：
 - 必读上下文路径。
 - 执行方式：真实多 agent 任务由主控派发；编码 worker 按任务卡记录 TDD 决策和验证证据。
 - 允许修改和禁止修改范围。
-- worktree/branch/base commit。
+- 精确 worktree target、branch、base 和 owned registry 登记状态。
 - UI/API 事实源。
 - 验证命令。
 - TDD 决策和证据要求：RED 命令、预期失败原因、GREEN 命令、证据写入位置或跳过原因。
@@ -80,6 +96,7 @@ Handoff 必须包含：
 
 - 完成内容。
 - 改动文件。
+- 实际 worktree target、branch、base，以及交接时与 registry/Git 的一致性。
 - review artifact 引用：worktree diff、patch、PR，或用户明确授权后的 local commit。
 - TDD 证据：`required / not-applicable / deferred`、RED 命令与失败原因、GREEN 命令与通过结果、跳过或延后原因。
 - 调试证据：如果出现失败或 bug，记录 root cause、证据和修复验证。
@@ -90,7 +107,10 @@ Handoff 必须包含：
 
 ## Review Agent Checkpoint
 
-Review agent 不新增正式 Gate。只要 Gate 1 启用了真实编码 worker，它默认必须运行；只有用户在 Gate 1 明确关闭时才跳过，并记录风险。它的职责是降低人工 review 成本，不替代用户 review。
+Review agent 不新增正式 Gate，也不依赖编码 subagent。Plan 可为
+`main-serial` 或任意真实 RP/diff 独立启用；启用 subagents 时必须在
+`approve-plan` 显式决定 `--review-agent true|false`。它的职责是降低人工
+review 成本，不替代用户 review。
 
 - 输入限定为一个 RP：diff 命令或 patch、相关 worktree/branch、上下文、API/UI 规格和验证记录。
 - 输出写入 `reviews/code-review/<RP>.md` 或 `reviews/code-review/index.md`。review agent 不直接同步 `reviews/review-packs.md` 或 `plans/progress.md`；主控读取 review 输出后统一 fan-in。
@@ -120,5 +140,17 @@ Feature agent 默认不能改公共契约。必须改且主控判断为真实契
 - 每个 review pack 有实际 artifact。
 - 启用 review agent 时，每个相关 RP 已 `agent-approved` 或明确 `not-needed`。
 - 公共契约变更已关闭或记录为风险。
-- worktree 分支基于预期 base；feature worktree 的 base 应为已 human-approved 的 foundation checkpoint commit。
+- 每个编码 worktree 仍存在于 owned registry，当前 target/branch/base 与 Git
+  状态一致；feature worktree 的 base 应为已 human-approved 的 foundation
+  checkpoint commit。
+- 已选定单一 owned/live integration target；其他 registered target 均
+  clean，且 HEAD 是 integration target HEAD 的祖先。
+- 主 validation contract 的 `sourceRoot` 等于 integration target；
+  `source-revision`、`run-verification`、`verify`、`request-review`、
+  `approve-review` 与 `request-final` 都传入同一个 integration
+  `--target`；`approve-final` 的 target 参数只按最终动作契约提供。
+- 主 evidence、verification snapshot 与 Gate Review Pack 只绑定
+  integration target，并记录其身份、identity hash 和 fan-in 快照；
+  target、registry 或 fan-in 变化后旧证据失效。worker target 的局部证据
+  只保留在 handoff。
 - 未跟踪文件被 worktree diff 或 patch 覆盖。

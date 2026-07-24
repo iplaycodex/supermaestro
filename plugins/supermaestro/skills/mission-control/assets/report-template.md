@@ -17,7 +17,25 @@
 
 | 声明/动作 | 证明命令 | 执行时间 | Exit code | 输出摘要 | 结论 |
 | --- | --- | --- | --- | --- | --- |
-| Gate 3 ready / Gate 4 ready / merge / commit / push / cleanup |  |  |  |  | pending |
+| Review ready / Final ready / merge / commit / push / cleanup |  |  |  |  | pending |
+
+## Worktree 与源码绑定
+
+worker 局部验证只作 handoff；主 contract/evidence/Gate Review Pack 只绑定
+fan-in 后的单一 integration target。
+
+- Integration target：
+- 主 `sourceRoot` / Git common dir：
+- 主 `source-revision --target`：
+- 主 `run-verification --target`：
+- 验证与 Gate target：`verify` / `request-review` / `approve-review` /
+  `request-final` 使用 integration target；`approve-final` 按动作契约填写
+- Target identity / identity hash：
+- Fan-in snapshot：
+
+| Worker target | Branch / Base | Registry/Git | Clean | HEAD 是 integration HEAD 祖先 | Handoff 局部证据 | Review Pack |
+| --- | --- | --- | --- | --- | --- | --- |
+|  |  | pending | pending | pending |  |  |
 
 ## TDD 证据汇总
 
@@ -43,7 +61,8 @@ TDD 风险：
 
 ## API/Mock 验证
 
-- 接口规格：specs/api-spec.md
+- API 发现：specs/api-spec.md
+- API 可执行契约：specs/api-contract.md
 - 接口契约：
 - Mock 挂载：
 - 调用方切换：
@@ -66,15 +85,20 @@ schema-only 验证：
 
 - 改动范围：
 - Review Pack：
-- Gate 3 Review：
-- Gate 4 最终动作：
-- Gate 4 环境：normal repo / linked worktree / detached HEAD
-- Gate 4 选择：merge local / push PR / keep / discard / cleanup
+- Review 结论：
+- Final 最终动作：
+- Final 环境：normal repo / linked worktree / detached HEAD
+- Final 选择：merge local / push PR / keep / discard / cleanup
 - 进度同步：
 - 已提交/未提交状态：
 - 是否已 merge：
 - 是否已 push：
 - Worktree 状态：
+- Cleanup target：
+- Cleanup 授权与检查：`approve-final --cleanup true --target "<path>"` /
+  `check --action cleanup --target "<path>"`；same target；
+  target/branch/HEAD/source fingerprint/clean match / rejected
+- CLI 未执行 `git worktree remove`：yes
 - `documents/` 工作台状态：
 - source/workbench 分层：
 - 发布前动作：

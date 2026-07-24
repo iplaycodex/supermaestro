@@ -4,9 +4,11 @@
 
 - 任务状态：ready-for-agent-review / blocked / changes-requested
 - Owner：
-- Worktree：
+- Worktree target：
 - Branch：
-- Base commit：
+- Base：
+- Owned registry：registered / drifted / missing
+- 交接时 Git 核验：target / branch / base match / mismatch
 - Foundation checkpoint commit：none / <commit>
 - Latest diff / patch / PR：
 - 自动提交 feature：no
@@ -25,6 +27,10 @@
 - 
 
 ## 验证
+
+本节是 worker target 的局部验证，只用于 handoff。主控 fan-in 后必须在单一
+integration target 重跑主 validation contract，不得把本节直接记成 Gate
+evidence。
 
 ### TDD 证据
 
@@ -74,4 +80,5 @@
 ## Fan-in 提醒
 
 - 本文件只代表当前 worktree/agent 的交接结果。
+- 本文件不改变 owned registry；目标漂移或缺失时，主控必须停止后续动作。
 - 主控需读取本 handoff、diff 和验证记录后，回写主工作台的 `plans/progress.md`、`agents/agent-index.md`、`worktrees/plan.md`、`reviews/review-packs.md` 和 `reports/validation.md`。

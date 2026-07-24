@@ -1,7 +1,7 @@
 {
   "name": "supermaestro",
-  "version": "1.2.0",
-  "description": "Requirement intake, mission-control, E2E, and visual-validation workflow suite for turning PRD, API, and UI materials into reviewable Codex workbenches.",
+  "version": "2.0.0",
+  "description": "将 PRD、API 与 UI 物料整理为可审查、可恢复研发工作台的 Codex 插件。",
   "author": {
     "name": "ALLEN LIU"
   },
@@ -21,8 +21,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "SuperMaestro",
-    "shortDescription": "需求物料生成与任务编排工作台",
-    "longDescription": "SuperMaestro packages a requirement intake and validation workflow for Codex: export UI materials, structure PRDs into traceable facts, create resumable mission-control workbenches, and audit project-owned E2E or visual-regression evidence at Review Gate.",
+    "shortDescription": "需求接收、任务编排与验证工作台",
+    "longDescription": "SuperMaestro 将 PRD、API 和 UI 物料转成可恢复的研发工作台，按 Scope、Plan、Review、Final 四道人工门禁推进，并用结构化契约和证据审计项目自己的 E2E 与视觉验证。插件只记录和校验最终动作授权，不会自行执行 commit、merge、push 或 cleanup。",
     "developerName": "ALLEN LIU",
     "category": "Developer Tools",
     "capabilities": [
@@ -30,12 +30,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "使用 $requirement-workbench 接收这个需求，生成 source 物料和 mission-control workbench，先停在 Gate 1。",
-      "使用 scripts/supermaestro.js 初始化和检查 workbench 的 state.json、events.jsonl、mission.state.json，再推进 Gate。",
-      "使用 $mission-control 处理这个需求，先规划并生成 review pack。",
-      "使用 $lanhu-export 从蓝湖链接导出 schema-only UI 物料。",
-      "使用 $validate-weapp-e2e 按验证契约运行微信小程序核心链路并记录结构化证据。",
-      "使用 $validate-visual-regression 按画板和状态核验设计还原与视觉回归证据。"
+      "使用 $requirement-workbench 接收这个需求，整理 PRD、API、UI 物料并停在 Scope Gate 等待确认。",
+      "使用 $mission-control 按需求复杂度选择执行模式，生成可审查计划，并在每道人工 Gate 前停下。",
+      "使用 $validate-weapp-e2e 或 $validate-visual-regression 按 validation contract 运行项目验证并记录结构化 evidence。"
     ],
     "brandColor": "#2563EB"
   }

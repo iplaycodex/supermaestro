@@ -1,4 +1,4 @@
 interface:
   display_name: "蓝湖物料导出"
-  short_description: "导出蓝湖分组 schema 和画板清单。"
+  short_description: "按蓝湖版本分组安全导出画板清单、设计 schema 与可选图片基线"
   default_prompt: "使用 $lanhu-export 从这个蓝湖项目链接按版本分组导出设计稿 schema 和画板清单。"

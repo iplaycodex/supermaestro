@@ -1,4 +1,4 @@
 interface:
-  display_name: "Validate Visual Regression"
-  short_description: "逐状态核验设计还原与视觉回归，审计基线、差异、阈值和遮罩证据"
+  display_name: "视觉回归验证"
+  short_description: "逐状态核验设计还原与视觉回归，并审计基线、差异、阈值和遮罩证据"
   default_prompt: "使用 $validate-visual-regression 按画板和页面状态逐项生成 expected、actual、diff，并记录可供 Review Gate 校验的视觉 evidence。"

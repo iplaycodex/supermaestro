@@ -73,13 +73,33 @@ function seedReviewableWorkbench(workbench) {
   write(path.join(workbench, 'plans', 'progress.md'), '# Progress\n\nBrainstorming：无\n');
   write(path.join(workbench, 'plans', 'task-plan.md'), '# Plan\n\n结构化验证计划。\n');
   write(
-    path.join(workbench, 'reviews', 'review-packs.md'),
-    '# Review Packs\n\n## Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | validation | git diff HEAD | CLI | npm test | evidence | medium |\n'
+    path.join(workbench, 'specs', 'behavior-contract.md'),
+    '# Behavior Contract\n\n结论：无复杂行为变更。\n'
   );
+  write(
+    path.join(workbench, 'reviews', 'review-packs.md'),
+    '# Review Packs\n\n## Review Contract\n\n| RP | Scope | Patch | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | validation | reviews/rp1.patch | CLI | npm test | evidence | medium |\n'
+  );
+  write(path.join(workbench, 'reviews', 'rp1.patch'), 'diff --git a/src.js b/src.js\n--- a/src.js\n+++ b/src.js\n@@ -0,0 +1 @@\n+verified\n');
   write(
     path.join(workbench, 'reports', 'validation.md'),
     '# Validation\n\n- TDD 决策：适用，结构化验证场景已覆盖。\n- 完成前验证：运行 node tests/runner.js，结果通过，exit code 0。\n- 结构化 E2E 与视觉 evidence 见 reports/evidence.jsonl。\n'
   );
+}
+
+function recordCommandEvidence(workbench) {
+  mustPass([
+    'run-verification',
+    workbench,
+    '--program',
+    process.execPath,
+    '--args-json',
+    '["-e","process.stdout.write(\\"verified\\\\n\\")"]',
+    '--report',
+    'reports/command.log',
+    '--artifacts',
+    'reports/validation.md'
+  ]);
 }
 
 function approvePlan(workbench) {
@@ -136,7 +156,7 @@ function writeValidationContract(workbench) {
               command: 'npm run test:e2e:weapp:visual',
               sourceRef: 'BOARD-1',
               target: 'pages/demo/index',
-              baseline: 'reports/artifacts/board-1.expected.png',
+              baseline: 'ui/board-1.expected.png',
               baselineHash,
               purpose: 'design-conformance',
               maxDiffRatio: 0.05,
@@ -179,6 +199,40 @@ try {
     { cwd: validationSourceRoot, encoding: 'utf8' }
   );
   assert.equal(commitSource.status, 0, commitSource.stderr);
+  assert.equal(fingerprintGitWorkingTree(validationSourceRoot), sourceRevision);
+  const branchResult = spawnSync('git', ['branch', '--show-current'], {
+    cwd: validationSourceRoot,
+    encoding: 'utf8'
+  });
+  assert.equal(branchResult.status, 0, branchResult.stderr);
+  const validationSourceBranch = branchResult.stdout.trim();
+  assert.ok(validationSourceBranch);
+  const addRemote = spawnSync(
+    'git',
+    ['remote', 'add', 'origin', 'https://example.invalid/supermaestro.git'],
+    { cwd: validationSourceRoot, encoding: 'utf8' }
+  );
+  assert.equal(addRemote.status, 0, addRemote.stderr);
+
+  const autoDiscoveredWorkbench = path.join(
+    validationSourceRoot,
+    'documents',
+    'auto-source-root',
+    'workbench'
+  );
+  mustPass([
+    'init',
+    autoDiscoveredWorkbench,
+    '--name',
+    'Auto Source Root',
+    '--mode',
+    'standard'
+  ]);
+  assert.equal(
+    fs.realpathSync(readJson(path.join(autoDiscoveredWorkbench, 'state.json')).sourceRoot),
+    fs.realpathSync(validationSourceRoot)
+  );
+  fs.rmSync(path.join(validationSourceRoot, 'documents'), { recursive: true, force: true });
   assert.equal(fingerprintGitWorkingTree(validationSourceRoot), sourceRevision);
 
   const nestedWorkbench = path.join(validationSourceRoot, 'documents', 'demo', 'workbench');
@@ -277,7 +331,7 @@ try {
   assert.match(gitlinkProbe.stdout, /^git-working-tree:[a-f0-9]{64}\n$/);
 
   const boundaryWorkbench = path.join(tmp, 'source-root-boundary');
-  mustPass(['init', boundaryWorkbench, '--name', 'Source Boundary', '--mode', 'standard']);
+  mustPass(['init', boundaryWorkbench, '--name', 'Source Boundary', '--mode', 'standard', '--source-root', validationSourceRoot]);
   const initBoundaryGit = spawnSync('git', ['init'], {
     cwd: boundaryWorkbench,
     encoding: 'utf8'
@@ -291,11 +345,11 @@ try {
   assert.equal(addBoundarySource.status, 0, addBoundarySource.stderr);
   mustFail(
     ['source-revision', boundaryWorkbench, '--source-root', boundaryWorkbench],
-    /sourceRoot must not be the workbench/
+    /sourceRoot must not be the workbench|--target must match state\.sourceRoot/
   );
 
   const workbench = path.join(tmp, 'documents', 'demo', 'workbench');
-  mustPass(['init', workbench, '--name', 'Validation Demo', '--mode', 'standard']);
+  mustPass(['init', workbench, '--name', 'Validation Demo', '--mode', 'standard', '--source-root', validationSourceRoot]);
   mustPass(['scaffold', workbench, '--e2e', 'true', '--visual', 'true']);
 
   const state = readJson(path.join(workbench, 'state.json'));
@@ -318,7 +372,7 @@ try {
   mustFail(['check-contracts', workbench, '--strict', 'true'], /cases must contain at least one case/);
 
   const strictWorkbench = path.join(tmp, 'strict', 'documents', 'demo', 'workbench');
-  mustPass(['init', strictWorkbench, '--name', 'Strict Visual Demo', '--mode', 'strict']);
+  mustPass(['init', strictWorkbench, '--name', 'Strict Visual Demo', '--mode', 'strict', '--source-root', validationSourceRoot]);
   write(
     path.join(tmp, 'strict', 'documents', 'demo', 'source', 'ui', 'manifest.json'),
     '{"boards":[{"name":"Demo"}]}\n'
@@ -341,6 +395,9 @@ try {
 
   seedReviewableWorkbench(workbench);
   writeValidationContract(workbench);
+  const visualBaselines = path.join(workbench, 'ui');
+  write(path.join(visualBaselines, 'baseline-manifest.json'), '{"version":1}\n');
+  write(path.join(visualBaselines, 'board-1.expected.png'), 'baseline');
   assert.equal(mustPass(['source-revision', workbench]).stdout.trim(), sourceRevision);
   approvePlan(workbench);
 
@@ -408,8 +465,6 @@ try {
   const artifacts = path.join(workbench, 'reports', 'artifacts');
   write(path.join(artifacts, 'e2e.json'), '{"status":"passed"}\n');
   write(path.join(artifacts, 'visual.json'), '{"status":"passed"}\n');
-  write(path.join(artifacts, 'baseline-manifest.json'), '{"version":1}\n');
-  write(path.join(artifacts, 'board-1.expected.png'), 'baseline');
   write(path.join(artifacts, 'board-1.actual.png'), 'actual');
   write(path.join(artifacts, 'board-1.diff.png'), 'diff');
 
@@ -478,13 +533,13 @@ try {
       '--artifacts',
       'reports/artifacts/visual.json',
       '--baseline-manifest',
-      'reports/artifacts/baseline-manifest.json',
+      'ui/baseline-manifest.json',
       '--report',
       'reports/artifacts/visual.json',
       '--actual',
       'reports/artifacts/board-1.actual.png',
       '--expected',
-      'reports/artifacts/board-1.expected.png',
+      'ui/board-1.expected.png',
       '--diff',
       'reports/artifacts/board-1.diff.png',
       '--exit-code',
@@ -533,13 +588,13 @@ try {
     '--artifacts',
     'reports/artifacts/visual.json',
     '--baseline-manifest',
-    'reports/artifacts/baseline-manifest.json',
+    'ui/baseline-manifest.json',
     '--report',
     'reports/artifacts/visual.json',
     '--actual',
     'reports/artifacts/board-1.actual.png',
     '--expected',
-    'reports/artifacts/board-1.expected.png',
+    'ui/board-1.expected.png',
     '--diff',
     'reports/artifacts/board-1.diff.png',
     '--exit-code',
@@ -626,7 +681,10 @@ try {
   const changedContract = JSON.parse(JSON.stringify(currentContract));
   changedContract.e2e.cases[0].expected = '一级 Tab 交互规则已变化';
   write(contractPath, `${JSON.stringify(changedContract, null, 2)}\n`);
-  mustFail(['verify', workbench], /contractHash does not match/);
+  mustFail(
+    ['verify', workbench],
+    /contractHash does not match|plan gate approval no longer matches/
+  );
   write(contractPath, `${JSON.stringify(currentContract, null, 2)}\n`);
   mustPass(['verify', workbench]);
 
@@ -635,7 +693,10 @@ try {
   tamperedState.artifacts.triggers.visual = false;
   write(path.join(workbench, 'state.json'), `${JSON.stringify(tamperedState, null, 2)}\n`);
   fs.rmSync(path.join(artifacts, 'e2e.json'));
-  mustFail(['verify', workbench], /test\.e2e artifact does not exist/);
+  mustFail(
+    ['verify', workbench],
+    /test\.e2e artifact (?:does not exist|reference is invalid)|plan gate approval no longer matches/
+  );
   write(path.join(artifacts, 'e2e.json'), '{"status":"passed"}\n');
   const restoredState = readJson(path.join(workbench, 'state.json'));
   restoredState.artifacts.triggers.e2e = true;
@@ -709,13 +770,13 @@ try {
     '--artifacts',
     'reports/artifacts/visual.json',
     '--baseline-manifest',
-    'reports/artifacts/baseline-manifest.json',
+    'ui/baseline-manifest.json',
     '--report',
     'reports/artifacts/visual.json',
     '--actual',
     'reports/artifacts/board-1.actual.png',
     '--expected',
-    'reports/artifacts/board-1.expected.png',
+    'ui/board-1.expected.png',
     '--diff',
     'reports/artifacts/board-1.diff.png',
     '--exit-code',
@@ -765,13 +826,13 @@ try {
     '--artifacts',
     'reports/artifacts/visual.json',
     '--baseline-manifest',
-    'reports/artifacts/baseline-manifest.json',
+    'ui/baseline-manifest.json',
     '--report',
     'reports/artifacts/visual.json',
     '--actual',
     'reports/artifacts/board-1.actual.png',
     '--expected',
-    'reports/artifacts/board-1.expected.png',
+    'ui/board-1.expected.png',
     '--diff',
     'reports/artifacts/board-1.diff.png',
     '--exit-code',
@@ -796,19 +857,44 @@ try {
   mustPass(['verify', workbench]);
 
   fs.rmSync(path.join(artifacts, 'visual.json'));
-  mustFail(['verify', workbench], /artifact does not exist/);
+  mustFail(['verify', workbench], /artifact (?:does not exist|reference is invalid)/);
   write(path.join(artifacts, 'visual.json'), '{"status":"passed"}\n');
   mustPass(['request-review', workbench]);
   fs.rmSync(path.join(artifacts, 'e2e.json'));
   mustFail(
-    ['approve-review', workbench, '--review', 'true', '--validation', 'true'],
-    /artifact does not exist/
+    [
+      'approve-review',
+      workbench,
+      '--review-accepted',
+      'true',
+      '--validation-accepted',
+      'true',
+      '--confirmed-by',
+      'user',
+      '--confirmation',
+      '用户确认 review 与验证'
+    ],
+    /artifact (?:does not exist|reference is invalid)/
   );
   write(path.join(artifacts, 'e2e.json'), '{"status":"passed"}\n');
-  mustPass(['approve-review', workbench, '--review', 'true', '--validation', 'true']);
+  mustPass([
+    'approve-review',
+    workbench,
+    '--review-accepted',
+    'true',
+    '--validation-accepted',
+    'true',
+    '--confirmed-by',
+    'user',
+    '--confirmation',
+    '用户确认 review 与验证'
+  ]);
 
   fs.rmSync(path.join(artifacts, 'e2e.json'));
-  mustFail(['request-final', workbench], /artifact does not exist/);
+  mustFail(
+    ['request-final', workbench],
+    /artifact (?:does not exist|reference is invalid)/
+  );
   write(path.join(artifacts, 'e2e.json'), '{"status":"passed"}\n');
   mustPass(['request-final', workbench]);
   fs.rmSync(path.join(artifacts, 'e2e.json'));
@@ -829,23 +915,28 @@ try {
       '--cleanup',
       'false'
     ],
-    /artifact does not exist/
+    /artifact (?:does not exist|reference is invalid)/
   );
   write(path.join(artifacts, 'e2e.json'), '{"status":"passed"}\n');
 
   const lateTriggerWorkbench = path.join(tmp, 'late-trigger', 'workbench');
-  mustPass(['init', lateTriggerWorkbench, '--name', 'Late Trigger Demo', '--mode', 'standard']);
+  mustPass(['init', lateTriggerWorkbench, '--name', 'Late Trigger Demo', '--mode', 'standard', '--source-root', validationSourceRoot]);
   mustPass(['scaffold', lateTriggerWorkbench]);
   seedReviewableWorkbench(lateTriggerWorkbench);
   approvePlan(lateTriggerWorkbench);
+  recordCommandEvidence(lateTriggerWorkbench);
   mustPass(['request-review', lateTriggerWorkbench]);
   mustPass([
     'approve-review',
     lateTriggerWorkbench,
-    '--review',
+    '--review-accepted',
     'true',
-    '--validation',
-    'true'
+    '--validation-accepted',
+    'true',
+    '--confirmed-by',
+    'user',
+    '--confirmation',
+    '用户确认 late review'
   ]);
   mustPass(['request-final', lateTriggerWorkbench]);
   mustPass([
@@ -862,14 +953,42 @@ try {
     '--push',
     'true',
     '--cleanup',
-    'false'
+    'false',
+    '--target',
+    validationSourceRoot,
+    '--push-remote',
+    'origin',
+    '--push-ref',
+    validationSourceBranch
   ]);
   const lateValidation = path.join(lateTriggerWorkbench, 'reports', 'validation.md');
   const lateValidationContent = fs.readFileSync(lateValidation, 'utf8');
   fs.writeFileSync(lateValidation, '');
-  mustFail(['check', lateTriggerWorkbench, '--action', 'push'], /Missing or empty/);
+  mustFail([
+    'check',
+    lateTriggerWorkbench,
+    '--action',
+    'push',
+    '--target',
+    validationSourceRoot,
+    '--push-remote',
+    'origin',
+    '--push-ref',
+    validationSourceBranch
+  ], /Missing or empty/);
   fs.writeFileSync(lateValidation, lateValidationContent);
-  mustPass(['check', lateTriggerWorkbench, '--action', 'push']);
+  mustPass([
+    'check',
+    lateTriggerWorkbench,
+    '--action',
+    'push',
+    '--target',
+    validationSourceRoot,
+    '--push-remote',
+    'origin',
+    '--push-ref',
+    validationSourceBranch
+  ]);
   mustPass(['scaffold', lateTriggerWorkbench, '--e2e', 'true']);
   const invalidatedState = readJson(path.join(lateTriggerWorkbench, 'state.json'));
   assert.equal(invalidatedState.gates.gate2, 'pending');
@@ -878,7 +997,7 @@ try {
   mustFail(['check', lateTriggerWorkbench, '--action', 'push'], /final gate is not approved/i);
 
   const blockedWorkbench = path.join(tmp, 'blocked', 'workbench');
-  mustPass(['init', blockedWorkbench, '--name', 'Blocked Demo', '--mode', 'standard']);
+  mustPass(['init', blockedWorkbench, '--name', 'Blocked Demo', '--mode', 'standard', '--source-root', validationSourceRoot]);
   mustPass(['scaffold', blockedWorkbench, '--e2e', 'true']);
   seedReviewableWorkbench(blockedWorkbench);
   write(

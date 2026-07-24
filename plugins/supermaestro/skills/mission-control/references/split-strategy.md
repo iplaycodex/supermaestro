@@ -14,8 +14,11 @@
 6. 找出高风险的跨领域改动，保留给主控或专项 agent 处理。
 7. 给每个切片标注 TDD 决策：`required / not-applicable / deferred`，并写明失败测试命令、预期失败原因、通过测试命令或跳过原因。
 8. 给每个切片定义 review pack：文件范围、review artifact、预期 diff 命令、验证命令和排除项。
-9. 确定动态模块：串行只保留 Core；worktree 才生成 tasks/worktrees/integration；subagents 才生成 agents/handoff；checkpoint=false 且多个 RP 才生成 patches。
-10. 把结果整理成带前置依赖、review pack、TDD 决策和验证点的 DAG。
+9. 确定动态模块：串行只保留 Core；worktree 才生成 worktree 计划；subagents
+   才生成 agent brief/handoff；复杂集成才生成 integration。
+10. worktree 模式为每个编码切片分配唯一 `target/branch/base`，后续按精确
+    意图检查、调用方创建和 CLI 登记闭环执行。
+11. 把结果整理成带前置依赖、review pack、TDD 决策和验证点的 DAG。
 
 ## Foundation Review Checkpoint
 
