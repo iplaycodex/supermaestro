@@ -1,0 +1,81 @@
+plugins/supermaestro/skills/prd-structure/SKILL.md
+  s_49a675664af388::t_0d489f77fecd5b 3,21,35,60,69,81-82,84,92,100,102-104,106,111
+plugins/supermaestro/skills/requirement-workbench/SKILL.md
+  s_49a675664af388::t_7fb90a6df05cd1 3,8,14,19-21,42-43,47-51,55-56,58-60,65
+plugins/supermaestro/profiles/core-workflow.md
+  s_964f1a748ea0d3::t_af974d9adc76f2 10,21-22,40,63-65,104
+plugins/supermaestro/references/multi-agent-protocol.md
+  s_964f1a748ea0d3::t_3223e54ec1f820 8-13
+plugins/supermaestro/references/split-strategy.md
+  s_964f1a748ea0d3::t_e0bf2c229001e9 5,7
+plugins/supermaestro/references/worktree-strategy.md
+  s_964f1a748ea0d3::t_d7b42bfa29e64a 17
+plugins/supermaestro/scripts/supermaestro.js
+  s_964f1a748ea0d3::t_9c6f81f698944c 5,58,175-177,182,792-798,800-801,806-807,809,818-820,832-838,847,944,957-958,1133-1136,1139-1154,1156-1166,1168-1169,1172-1198,1200-1201,1203,1206-1212,1215-1239,1242-1248,1251-1270,1273-1281,1406,1411-1425,1490-1492,1704,1720
+plugins/supermaestro/skills/lanhu-export/SKILL.md
+  s_964f1a748ea0d3::t_58be85c92b25fe 3,16,40,43,46,52,63,66,88,92,107
+plugins/supermaestro/skills/mission-control/SKILL.md
+  s_964f1a748ea0d3::t_07118cdb719afa 3,6,8,12-13,16,18,20-22,24,28,31-36,39,50,73,81,87,89,91,102,113,135,137-138,140-142,150,152,154,156,158,161,163,165,167,169,171-172,174,176,178,180-184,186,188,190,192,196,198,200-201,203-208,210,213-215,217,219,221,223-224,228-232
+plugins/supermaestro/skills/mission-control/assets/agent-brief-template.md
+  s_964f1a748ea0d3::t_9f8f96c80037a7 9,20
+plugins/supermaestro/skills/mission-control/assets/agent-handoff-template.md
+  s_964f1a748ea0d3::t_2ef0f173402c38 15
+plugins/supermaestro/skills/mission-control/assets/plan-template.md
+  s_964f1a748ea0d3::t_96ed663bc2924c 13,43,64-65,67-71,98
+plugins/supermaestro/skills/mission-control/assets/review-template.md
+  s_964f1a748ea0d3::t_9fc9164d3ae275 44
+plugins/supermaestro/skills/mission-control/assets/task-card-template.md
+  s_964f1a748ea0d3::t_2834fd192ff2b5 22
+plugins/supermaestro/skills/mission-control/references/multi-agent-protocol.md
+  s_964f1a748ea0d3::t_16cc39823b631e 13,15,17-23,66
+plugins/supermaestro/skills/mission-control/references/worktree-strategy.md
+  s_964f1a748ea0d3::t_88855edc7fef21 100
+plugins/supermaestro/skills/mission-control/scripts/harness.js
+  s_40f71b6cfdc4cb::t_75431cd7666e22 482-487,879-882,1295,1318,1352,1371,1403
+plugins/supermaestro/skills/mission-control/scripts/harness.test.js
+  s_40f71b6cfdc4cb::t_6c6c703a444dfd 133,136,143-144,156-157,159,172,181,183-223,229
+plugins/supermaestro/skills/validate-visual-regression/SKILL.md
+  s_964f1a748ea0d3::t_e202470d6f5510 3,6,8,10,12-14,20-44
+plugins/supermaestro/skills/validate-weapp-e2e/SKILL.md
+  s_964f1a748ea0d3::t_ff53ce950814bc 3,6,8,10,12-14,20-46
+tests/supermaestro-smoke.test.js
+  s_964f1a748ea0d3::t_b2397bf90c2006 112-113,122-123,132-133
+tests/supermaestro-strict-contracts.test.js
+  s_964f1a748ea0d3::t_af6d8db4c802c8 80,83,169,175-178
+tests/supermaestro-v2-smoke.test.js
+  s_964f1a748ea0d3::t_c4648830c5bd08 49-51,57,75-76,81-131
+tests/supermaestro-validation-evidence.test.js
+  s_964f1a748ea0d3::t_33f9ab715ad543 81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e2143bf0108487dfe6cf2b8b9db7d22c42878242",
+  "prompts": {},
+  "sessions": {
+    "s_40f71b6cfdc4cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9224-db50-77b1-845c-2e37bd766bea",
+        "model": "unknown"
+      },
+      "human_author": "liuliang <liuliang@wywk.cn>"
+    },
+    "s_49a675664af388": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f92ab-9e73-73e1-9163-27ddf67f095f",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "liuliang <liuliang@wywk.cn>"
+    },
+    "s_964f1a748ea0d3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f920a-c620-71f3-9616-eb70c31a1935",
+        "model": "unknown"
+      },
+      "human_author": "liuliang <liuliang@wywk.cn>"
+    }
+  }
+}
