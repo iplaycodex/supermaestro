@@ -78,7 +78,7 @@ function seedReviewableWorkbench(workbench) {
   );
   write(
     path.join(workbench, 'reports', 'validation.md'),
-    '# Validation\n\n结构化 E2E 与视觉 evidence 见 reports/evidence.jsonl。\n'
+    '# Validation\n\n- TDD 决策：适用，结构化验证场景已覆盖。\n- 完成前验证：运行 node tests/runner.js，结果通过，exit code 0。\n- 结构化 E2E 与视觉 evidence 见 reports/evidence.jsonl。\n'
   );
 }
 
@@ -92,18 +92,6 @@ function approvePlan(workbench) {
     '用户确认验证能力范围'
   ]);
   mustPass([
-    'evidence',
-    workbench,
-    '--type',
-    'skill.used',
-    '--skill',
-    'superpowers:writing-plans',
-    '--phase',
-    'plan',
-    '--summary',
-    '已应用 writing-plans'
-  ]);
-  mustPass([
     'approve-plan',
     workbench,
     '--mode',
@@ -112,18 +100,6 @@ function approvePlan(workbench) {
     'user',
     '--confirmation',
     '用户确认验证执行计划'
-  ]);
-  mustPass([
-    'evidence',
-    workbench,
-    '--type',
-    'skill.used',
-    '--skill',
-    'superpowers:verification-before-completion',
-    '--phase',
-    'review',
-    '--summary',
-    '已执行完成前验证'
   ]);
 }
 
@@ -834,18 +810,6 @@ try {
   fs.rmSync(path.join(artifacts, 'e2e.json'));
   mustFail(['request-final', workbench], /artifact does not exist/);
   write(path.join(artifacts, 'e2e.json'), '{"status":"passed"}\n');
-  mustPass([
-    'evidence',
-    workbench,
-    '--type',
-    'skill.used',
-    '--skill',
-    'superpowers:finishing-a-development-branch',
-    '--phase',
-    'final',
-    '--summary',
-    '已执行最终分支交付检查'
-  ]);
   mustPass(['request-final', workbench]);
   fs.rmSync(path.join(artifacts, 'e2e.json'));
   mustFail(
@@ -882,18 +846,6 @@ try {
     'true',
     '--validation',
     'true'
-  ]);
-  mustPass([
-    'evidence',
-    lateTriggerWorkbench,
-    '--type',
-    'skill.used',
-    '--skill',
-    'superpowers:finishing-a-development-branch',
-    '--phase',
-    'final',
-    '--summary',
-    '已执行最终分支交付检查'
   ]);
   mustPass(['request-final', lateTriggerWorkbench]);
   mustPass([

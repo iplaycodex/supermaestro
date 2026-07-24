@@ -109,8 +109,8 @@ function seedGate2Docs(workbench, { subagents = false } = {}) {
     [
       '# 任务计划',
       '',
-      '已读取 superpowers:writing-plans。',
-      '任务：完成 smoke test。'
+      '任务：完成 smoke test。',
+      '验证：运行 npm test，并记录结果。'
     ].join('\n')
   );
   write(
@@ -119,8 +119,8 @@ function seedGate2Docs(workbench, { subagents = false } = {}) {
       '# 进度',
       '',
       subagents
-        ? '已执行 superpowers:subagent-driven-development。'
-        : '已执行 superpowers:executing-plans。'
+        ? '执行模式：多 agent 并行。'
+        : '执行模式：主控串行。'
     ].join('\n')
   );
   write(path.join(workbench, 'reviews', 'review-packs.md'), '# Review Packs\n\npending。\n');
@@ -129,13 +129,8 @@ function seedGate2Docs(workbench, { subagents = false } = {}) {
     [
       '# 验证',
       '',
-      '## Superpowers 调用证据',
-      '',
-      '- 已读取 superpowers:writing-plans。',
-      '- 已读取 superpowers:test-driven-development。',
-      subagents
-        ? '- 已读取 superpowers:subagent-driven-development。'
-        : '- 已执行 superpowers:executing-plans。'
+      '- TDD 决策：本次 smoke test 适用。',
+      '- 完成前验证：运行 npm test。'
     ].join('\n')
   );
 }

@@ -19,7 +19,7 @@
 - 自动提交 feature：no
 - Foundation human-approved 后 checkpoint commit 授权：
 - Worktree 可运行性：每个 worktree install / 完整项目拷贝 / 仅静态验证
-- 执行方式：SDD worker / 主控串行 / executing-plans fallback
+- 执行方式：worker agent / 主控串行
 - TDD 适用性：required / not-applicable / deferred
 - TDD 证据写入：本任务 handoff + reports/validation.md
 - Debug 触发：bug / test failure / build failure / integration failure / review finding 时 required

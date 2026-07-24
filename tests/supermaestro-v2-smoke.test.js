@@ -46,19 +46,19 @@ function state(workbench) {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'supermaestro-v2-smoke-'));
 
 try {
-  mustPass(['help']);
+  const removedPolicyName = ['super', 'powers'].join('');
+  const helpResult = mustPass(['help']);
+  assert.doesNotMatch(helpResult.stdout, new RegExp(removedPolicyName, 'i'));
 
   const lite = path.join(tmp, 'lite', 'workbench');
   mustPass(['init', lite, '--name', 'Lite Demo', '--mode', 'lite']);
   mustPass(['scaffold', lite]);
   assert.equal(state(lite).mode, 'lite');
+  assert.equal(state(lite).policies, undefined);
   mustFail(['check-workbench', lite], /Lite brief is not confirmed/);
   write(path.join(lite, 'brief.md'), '# Lite Brief\n\n状态：已确认\n确认人：user\n\n## 本次要做\n- demo\n\n## 验证方式\n- demo\n');
   mustPass(['check-workbench', lite]);
   mustPass(['approve-scope', lite, '--confirmed-by', 'user', '--confirmation', '用户确认 lite 范围']);
-  mustFail(['check', lite, '--action', 'code', '--non-ui', 'true', '--reason', '只改低风险逻辑'], /test-driven-development/);
-  mustPass(['evidence', lite, '--type', 'skill.used', '--skill', 'superpowers:test-driven-development', '--phase', 'code', '--summary', '已评估 TDD']);
-  mustPass(['evidence', lite, '--type', 'skill.used', '--skill', 'superpowers:executing-plans', '--phase', 'code', '--summary', '按计划执行']);
   mustPass(['check', lite, '--action', 'code', '--non-ui', 'true', '--reason', '只改低风险逻辑']);
 
   const standard = path.join(tmp, 'standard', 'documents', 'demo', 'workbench');
@@ -72,15 +72,63 @@ try {
   write(path.join(standard, 'plans', 'progress.md'), '# Progress\n\nBrainstorming：无\n');
   mustPass(['check-workbench', standard]);
   mustPass(['approve-gate1', standard, '--confirmed-by', 'user', '--confirmation', '用户确认 scope']);
-  mustFail(['approve-plan', standard, '--confirmed-by', 'user', '--confirmation', '用户确认 plan'], /writing-plans/);
-  mustPass(['evidence', standard, '--type', 'skill.used', '--skill', 'superpowers:writing-plans', '--phase', 'plan', '--summary', '已应用 writing-plans']);
+  mustFail(['approve-plan', standard, '--confirmed-by', 'user', '--confirmation', '用户确认 plan'], /template placeholders/);
+  write(path.join(standard, 'plans', 'task-plan.md'), '# Plan\n\n任务：完成标准模式验证。\n\n验证：运行 npm test。\n');
   mustPass(['approve-plan', standard, '--mode', 'main-serial', '--confirmed-by', 'user', '--confirmation', '用户确认 plan']);
   mustFail(['check', standard, '--action', 'code'], /Non-UI code checks require/);
-  mustFail(['check', standard, '--action', 'code', '--ui', 'true', '--schema-extract', 'specs/ui-schema-extract.md'], /test-driven-development/);
-  mustPass(['evidence', standard, '--type', 'skill.used', '--skill', 'superpowers:test-driven-development', '--phase', 'code', '--summary', '已评估 TDD']);
-  mustPass(['evidence', standard, '--type', 'skill.used', '--skill', 'superpowers:executing-plans', '--phase', 'code', '--summary', '按计划执行']);
   mustPass(['check', standard, '--action', 'code', '--ui', 'true', '--schema-extract', 'specs/ui-schema-extract.md']);
   mustFail(['check', standard, '--action', 'dispatch-subagent'], /Gate 2 execution mode did not enable subagents/);
+  mustFail(['request-review', standard], /Completion readiness failures/);
+  assert.equal(state(standard).checks.reviewability, 'failed');
+  write(path.join(standard, 'reviews', 'review-packs.md'), '# Review Packs\n\nbranch: not-created\n');
+  write(
+    path.join(standard, 'reports', 'validation.md'),
+    '# Validation\n\n- TDD 决策：未评估。\n- 完成前验证：npm test 未执行；预期通过。\n- UI / Visual Validation：schema-only 人工核对通过。\n'
+  );
+  mustFail(['request-review', standard], /executed completion-verification record/);
+  write(
+    path.join(standard, 'reports', 'validation.md'),
+    '# Validation\n\n- TDD 决策：适用，已覆盖订单 pending 状态。\n- 完成前验证：运行 npm test，结果通过，exit code 0。\n- UI / Visual Validation：schema-only 人工核对通过。\n'
+  );
+  mustFail(['request-review', standard], /concrete diff command/);
+  write(
+    path.join(standard, 'reviews', 'review-packs.md'),
+    '# Review Packs\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | CLI | git diff HEAD | supermaestro.js | npm test | 订单 pending 状态 | low |\n'
+  );
+  write(
+    path.join(standard, 'reports', 'validation.md'),
+    '# Validation\n\n- TDD 决策：适用。\n- 完成前验证：运行 npm test，结果未通过。\n- UI / Visual Validation：schema-only 人工核对通过。\n'
+  );
+  mustFail(['request-review', standard], /executed completion-verification record/);
+  write(
+    path.join(standard, 'reports', 'validation.md'),
+    '# Validation\n\n- TDD 决策：适用。\n- 完成前验证：运行 npm test，结果通过。\n\n| 检查 | 结果 |\n| --- | --- |\n| npm test | passed |\n| E2E | pending |\n\n- UI / Visual Validation：schema-only 人工核对通过。\n'
+  );
+  mustFail(['request-review', standard], /unresolved template placeholders/);
+  write(
+    path.join(standard, 'reports', 'validation.md'),
+    '# Validation\n\n- TDD 决策：是否适用仍未决定。\n- 完成前验证：运行 npm test，结果通过，exit code 0。\n- UI / Visual Validation：schema-only 人工核对通过。\n'
+  );
+  mustFail(['request-review', standard], /resolved TDD applicability decision/);
+  write(
+    path.join(standard, 'reports', 'validation.md'),
+    '# Validation\n\n- TDD 决策：适用，已覆盖订单 pending 状态。\n\n## 完成前验证\n\n| 命令 | 结果 |\n| --- | --- |\n| npm test | passed |\n\n| 订单 | 业务状态 |\n| --- | --- |\n| 1 | pending |\n\n- UI / Visual Validation：schema-only 人工核对通过。\n'
+  );
+  mustPass(['request-review', standard]);
+  assert.equal(state(standard).checks.reviewability, 'passed');
+
+  const legacyPolicy = path.join(tmp, 'legacy-policy', 'workbench');
+  mustPass(['init', legacyPolicy, '--name', 'Legacy Policy Demo', '--mode', 'standard']);
+  const legacyState = state(legacyPolicy);
+  legacyState.policies = { [removedPolicyName]: { enabled: true, enforcement: 'hard' } };
+  legacyState.checks.policy = 'failed';
+  legacyState.checks.policyMissing = [{ policy: removedPolicyName }];
+  write(path.join(legacyPolicy, 'state.json'), `${JSON.stringify(legacyState, null, 2)}\n`);
+  mustPass(['scaffold', legacyPolicy]);
+  assert.equal(state(legacyPolicy).policies, undefined);
+  assert.equal(state(legacyPolicy).checks.policy, undefined);
+  assert.equal(state(legacyPolicy).checks.policyMissing, undefined);
+  assert.equal(readJson(path.join(legacyPolicy, 'mission.state.json')).policies, undefined);
 
   console.log('SuperMaestro workflow v2 smoke tests passed.');
 } finally {

@@ -77,10 +77,10 @@ function seedScope(workbench) {
 }
 
 function seedPlan(workbench, { reviewReady = false } = {}) {
-  write(path.join(workbench, 'plans', 'task-plan.md'), '# Plan\n\n使用结构化 evidence 记录 planning policy。\n');
+  write(path.join(workbench, 'plans', 'task-plan.md'), '# Plan\n\n任务：验证 strict contracts。\n\n验证：运行 npm test。\n');
   write(
     path.join(workbench, 'reports', 'validation.md'),
-    '# Validation\n\nUI schema-only 人工核对已完成。\n'
+    '# Validation\n\n- TDD 决策：适用，已覆盖 strict contract 用例。\n- 完成前验证：运行 npm test，结果通过，exit code 0。\n- UI schema-only 人工核对通过。\n'
   );
   write(
     path.join(workbench, 'reviews', 'review-packs.md'),
@@ -118,10 +118,6 @@ function seedLegacyContracts(workbench, { reviewReady = false } = {}) {
       ? '# Review Contract\n\n| RP | Scope | Diff command | Files | Validation | Review Focus | Risk |\n| --- | --- | --- | --- | --- | --- | --- |\n| RP1 | Demo | git diff HEAD | CLI | npm test | strict contracts | 无 |\n'
       : '# Review Contract\n\nPlan 阶段 review pack pending，待实现后绑定 diff。\n'
   );
-}
-
-function addEvidence(workbench, skill, phase = 'plan') {
-  mustPass(['evidence', workbench, '--type', 'skill.used', '--skill', skill, '--phase', phase, '--summary', `已使用 ${skill}`]);
 }
 
 function approveScope(workbench) {
@@ -163,30 +159,25 @@ try {
   seedContracts(strict);
   mustPass(['check-contracts', strict]);
   approveScope(strict);
-  addEvidence(strict, 'superpowers:writing-plans');
   approvePlan(strict);
-  addEvidence(strict, 'superpowers:test-driven-development', 'code');
-  addEvidence(strict, 'superpowers:executing-plans', 'code');
   mustPass(['check', strict, '--action', 'code', '--ui', 'true', '--schema-extract', 'specs/ui-schema-extract.md']);
 
   const finalWb = path.join(tmp, 'strict-final', 'documents', 'demo', 'workbench');
   mustPass(['init', finalWb, '--name', 'Strict Final', '--mode', 'strict']);
   write(path.join(tmp, 'strict-final', 'documents', 'demo', 'source', 'ui', 'manifest.json'), '{"boards":[{"name":"Demo"}]}\n');
   write(path.join(tmp, 'strict-final', 'documents', 'demo', 'source', 'api', 'openapi.json'), '{}\n');
-  mustPass(['scaffold', finalWb, '--ui', 'true', '--api', 'true', '--ui-coding', 'true', '--behavior', 'true']);
+  mustPass(['scaffold', finalWb, '--ui', 'true', '--api', 'true', '--ui-coding', 'true', '--behavior', 'true', '--review-agent', 'true']);
   seedScope(finalWb);
   seedPlan(finalWb, { reviewReady: true });
   seedContracts(finalWb);
   approveScope(finalWb);
-  addEvidence(finalWb, 'superpowers:writing-plans');
   approvePlan(finalWb);
-  addEvidence(finalWb, 'superpowers:test-driven-development', 'code');
-  addEvidence(finalWb, 'superpowers:executing-plans', 'code');
-  addEvidence(finalWb, 'superpowers:verification-before-completion', 'review');
+  mustFail(['request-gate3', finalWb], /requires a review-agent report/);
+  write(path.join(finalWb, 'reviews', 'code-review', 'RP1.md'), '# Review Agent RP1\n\nstatus: changes-requested\n');
+  mustFail(['request-gate3', finalWb], /unresolved pending or changes-requested/);
+  write(path.join(finalWb, 'reviews', 'code-review', 'RP1.md'), '# Review Agent RP1\n\nstatus: agent-approved\n');
   mustPass(['request-gate3', finalWb]);
   mustPass(['approve-gate3', finalWb, '--review', 'true', '--validation', 'true']);
-  mustFail(['request-gate4', finalWb], /finishing-a-development-branch/);
-  addEvidence(finalWb, 'superpowers:finishing-a-development-branch', 'final');
   mustPass(['request-gate4', finalWb]);
   mustFail(['approve-gate4', finalWb, '--merge', 'false'], /confirmed-by user/);
   mustPass(['approve-gate4', finalWb, '--confirmed-by', 'user', '--confirmation', '用户确认 final action', '--merge', 'false', '--commit', 'false', '--push', 'false', '--cleanup', 'false']);
@@ -201,10 +192,7 @@ try {
   seedLegacyContracts(fallbackWb, { reviewReady: true });
   mustPass(['check-contracts', fallbackWb]);
   approveScope(fallbackWb);
-  addEvidence(fallbackWb, 'superpowers:writing-plans');
   approvePlan(fallbackWb);
-  addEvidence(fallbackWb, 'superpowers:test-driven-development', 'code');
-  addEvidence(fallbackWb, 'superpowers:executing-plans', 'code');
   mustPass(['check', fallbackWb, '--action', 'code', '--ui', 'true', '--schema-extract', 'specs/ui-schema-extract.md']);
 
   const legacy = path.join(tmp, 'legacy', 'documents', 'demo', 'workbench');
@@ -213,14 +201,9 @@ try {
   seedScope(legacy);
   seedPlan(legacy, { reviewReady: true });
   approveScope(legacy);
-  addEvidence(legacy, 'superpowers:writing-plans');
   approvePlan(legacy);
-  addEvidence(legacy, 'superpowers:test-driven-development', 'code');
-  addEvidence(legacy, 'superpowers:executing-plans', 'code');
-  addEvidence(legacy, 'superpowers:verification-before-completion', 'review');
   mustPass(['request-gate3', legacy]);
   mustPass(['approve-gate3', legacy, '--review', 'true', '--validation', 'true']);
-  addEvidence(legacy, 'superpowers:finishing-a-development-branch', 'final');
   mustPass(['request-gate4', legacy]);
   mustPass(['approve-gate4', legacy, '--confirmed-by', 'user', '--confirmation', '用户确认 legacy final', '--merge', 'false']);
 

@@ -10,17 +10,17 @@
 - Review agent：只读审查某个 review pack 的 diff/patch、验证证据和风险，不修改源码，不提交。
 - Integration agent 或主控：合并各分支，处理冲突，跑总验证，更新 Gate 2 材料。
 
-## Superpowers 执行分层
+## 执行分层
 
-Mission Control 负责主控流程，Superpowers 负责 worker 执行纪律：
+Mission Control 同时负责主控流程和 worker 执行纪律：
 
-- 计划阶段吸收 `superpowers:writing-plans` 的粒度：每个任务必须有明确文件、步骤、测试、命令和预期结果。
-- 真实多 agent 执行优先使用 `superpowers:subagent-driven-development`：主控给 worker 完整任务卡和最小必要上下文，worker 不继承主会话全部历史。
-- 编码 worker 必须按任务卡读取并遵守 `superpowers:test-driven-development`；只有任务卡标记 `TDD适用性: not-applicable` 或 `deferred` 时才可跳过，并且必须写明原因。
-- worker 遇到 bug、测试失败、构建失败、联调异常或行为 review finding 时，必须使用 `superpowers:systematic-debugging` 先找根因，再做最小修复。
-- review agent 使用 `superpowers:requesting-code-review` 的输入结构；changes-requested 修复使用 `superpowers:receiving-code-review` 的反馈处理纪律。
-- Gate 3/Gate 4 和任何完成声明前使用 `superpowers:verification-before-completion`；Gate 4 最终动作使用 `superpowers:finishing-a-development-branch` 的收尾顺序。
-- `superpowers:executing-plans` 只作为不开 subagent、跨会话或串行执行已有计划时的 fallback。
+- 每个任务必须有明确文件、步骤、测试、命令和预期结果。
+- 真实多 agent 执行时，主控给 worker 完整任务卡和最小必要上下文，worker 不继承主会话全部历史。
+- 编码 worker 必须按任务卡记录 TDD 适用性；只有标记 `not-applicable` 或 `deferred` 时才可跳过，并且必须写明原因。
+- worker 遇到 bug、测试失败、构建失败、联调异常或行为 review finding 时，先记录复现和根因，再做最小修复并复验。
+- review agent 只接收冻结的 review pack；changes-requested 修复前先核实 finding，再逐项处理或给出有证据的技术性驳回。
+- Gate 3/Gate 4 和任何完成声明前必须重新运行验证；Gate 4 按用户授权的交付与清理动作收尾。
+- 不开 subagent、跨会话或串行执行已有计划时，由主控直接按任务计划推进。
 
 ## Foundation-first
 
@@ -63,7 +63,7 @@ Mission Control 负责主控流程，Superpowers 负责 worker 执行纪律：
 
 - 任务卡路径。
 - 必读上下文路径。
-- 需调用的执行技能：SDD 任务由主控使用 `superpowers:subagent-driven-development` 派发；编码 worker 根据任务卡使用 `superpowers:test-driven-development`。
+- 执行方式：真实多 agent 任务由主控派发；编码 worker 按任务卡记录 TDD 决策和验证证据。
 - 允许修改和禁止修改范围。
 - worktree/branch/base commit。
 - UI/API 事实源。

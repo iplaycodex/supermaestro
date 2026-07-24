@@ -12,7 +12,7 @@
 - 自动提交 feature：no
 - Worktree 可运行性准备：
 - 如需 checkpoint commit 的用户授权：
-- 执行方式：SDD worker / 主控串行 / executing-plans fallback
+- 执行方式：worker agent / 主控串行
 - TDD 适用性：required / not-applicable / deferred
 - 调试状态：not-needed / investigated / blocked
 

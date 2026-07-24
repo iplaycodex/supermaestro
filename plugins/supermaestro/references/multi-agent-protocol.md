@@ -5,12 +5,12 @@ Use this only when Gate 1 explicitly enables subagents.
 Execution layering:
 
 - Mission Control keeps the workbench, gates, review packs, fan-in, validation, and final actions.
-- Use `superpowers:subagent-driven-development` for independent real worker agents in the current session.
-- Use `superpowers:executing-plans` only as a fallback when subagents are not used or execution is serial/cross-session.
-- Coding workers must follow `superpowers:test-driven-development` when the task touches behavior code, unless the task card explicitly marks TDD as `not-applicable` or `deferred`.
-- Workers must follow `superpowers:systematic-debugging` before fixing bugs, test failures, build failures, integration failures, or behavior review findings.
-- Review checkpoints use `superpowers:requesting-code-review`; changes-requested handling uses `superpowers:receiving-code-review`.
-- Gate 3/Gate 4 completion claims use `superpowers:verification-before-completion`; Gate 4 final action handling uses `superpowers:finishing-a-development-branch`.
+- Use independent worker agents only for task cards with clear boundaries and minimal required context.
+- Keep serial or cross-session execution under the main controller when subagents are not enabled.
+- Coding workers record a TDD decision for behavior changes: `required`, `not-applicable`, or `deferred`.
+- Before fixing failures or review findings, workers record reproduction, root cause, the minimal fix, and revalidation evidence.
+- Review checkpoints use a frozen review pack; changes-requested findings must be verified, resolved, or rejected with technical evidence.
+- Gate 3/Gate 4 and completion claims require fresh validation; final actions follow the approved delivery and cleanup choices.
 
 Flow:
 

@@ -7,7 +7,7 @@ SuperMaestro core owns workflow mechanics only:
 - workflow mode and state transitions
 - Scope / Plan / Review / Final Gates
 - artifact scaffold triggers
-- policy and contract checks
+- contract and validation checks
 - resume / next projection
 - final action authorization
 
@@ -18,8 +18,8 @@ Project-specific UI, framework, and product rules belong in domain profiles such
 | Mode | Use case | Gate flow | CLI behavior |
 | --- | --- | --- | --- |
 | `lite` | 小 bug、小文案、小样式、低风险改动 | Scope + Final | `check-workbench` checks `brief.md`; Plan and Review are skipped. |
-| `standard` | 普通前端需求 | Scope + Plan + Review + Final | Keeps V2 policy checks usable without strict contract hard-fail. |
-| `strict` | 多页面、多画板、强 UI、接口契约、高风险任务 | Scope + Plan + Review + Final | Adds hard contract validation and stricter policy evidence. |
+| `standard` | 普通前端需求 | Scope + Plan + Review + Final | Keeps contract findings reviewable without strict hard-fail. |
+| `strict` | 多页面、多画板、强 UI、接口契约、高风险任务 | Scope + Plan + Review + Final | Adds hard contract, reviewability, and validation checks. |
 
 旧 Gate 名称仅作为 compatibility aliases:
 
@@ -37,7 +37,7 @@ approve-gate4 -> approve-final
 Machine-readable workflow state:
 
 ```text
-workbench/state.json              # current workflow state, mode, gates, execution, policies, artifacts
+workbench/state.json              # current workflow state, mode, gates, execution, artifacts
 workbench/events.jsonl            # append-only workflow event log
 workbench/mission.state.json      # resume/next projection
 workbench/gates/*.json            # human gate decisions
@@ -57,14 +57,12 @@ workbench/reports/validation.md
 
 `workbench/specs/` 顶层只放人类主文档。机器可读 contract JSON 放在 `workbench/specs/machine/`，包括 `api-contract.json`、`ui-contract.json`、`review-contract.json` 和按 trigger 生成的 `validation-contract.json`。迁移期 CLI 仍 fallback 读取旧顶层 API / UI / review JSON。
 
-`reports/validation.md`, `plans/task-plan.md`, `plans/progress.md`, and `reviews/review-packs.md` remain legacy fallback evidence sources during migration. New machine evidence should be written to `reports/evidence.jsonl` with `supermaestro evidence`.
-
 ## Gate Rules
 
 - Scope Gate confirms scope / non-scope / acceptance alignment. CLI enforces explicit user confirmation through `approve-scope` or legacy `approve-gate1`.
-- Plan Gate confirms execution mode, plan artifacts, review strategy, and policy evidence. CLI enforces `superpowers:writing-plans` evidence through policy checks.
-- Review Gate confirms review packs and verification evidence. Both `request-review` and `approve-review` run `verify` so stale or removed evidence cannot pass. CLI also enforces `superpowers:verification-before-completion` evidence through policy checks.
-- Final Gate authorizes final actions. Both `request-final` and `approve-final` run `verify`; CLI also enforces independent user confirmation plus `verification-before-completion` and `finishing-a-development-branch` evidence.
+- Plan Gate confirms execution mode, a completed task plan, review strategy, and validation strategy.
+- Review Gate confirms review packs and verification evidence. Both `request-review` and `approve-review` run `verify` so stale or removed evidence cannot pass.
+- Final Gate authorizes final actions. Both `request-final` and `approve-final` run `verify`; `approve-final` also requires independent user confirmation.
 - Final action checks (`commit`, `merge`, `push`, `cleanup`) run `verify` again before authorization.
 - CLI checks are authoritative. If `supermaestro.js` rejects an action, stop and report the reason.
 
@@ -103,24 +101,7 @@ In `strict` mode, `approve-plan` runs contract validation as a hard gate. In `st
 
 `source-revision` hashes tracked + non-ignored untracked Git worktree content as `git-working-tree:<sha256>` and excludes the workbench. `verify` recomputes it live, then checks case coverage, contract/evidence agreement, non-empty artifacts, recorded file hashes, visual baseline integrity, and diff/mask thresholds. Source or artifact changes invalidate prior evidence. These checks apply at Review / Final and final action authorization whenever the corresponding trigger is active.
 
-## Superpowers Policy
-
-Superpowers is not removed. It is managed as the default `superpowers` policy pack:
-
-```text
-plugins/supermaestro/policies/superpowers.policy.json
-plugins/supermaestro/policies/superpowers.policy.md
-```
-
-Core workflow loads policy requirements and checks `reports/evidence.jsonl` first, then legacy Markdown fallback. The default policy enforces:
-
-- Plan approval: `superpowers:writing-plans`.
-- Code action: `superpowers:test-driven-development` plus `executing-plans` or `subagent-driven-development`.
-- Dispatch subagent: `superpowers:subagent-driven-development`.
-- Review request: `superpowers:verification-before-completion`.
-- Final request / approval / final actions: `verification-before-completion` plus `finishing-a-development-branch`.
-
-`strict` mode adds hard checks for contract completeness, UI schema map, Review Gate readiness, and no TDD skip for behavior/API/UI-risk work.
+`strict` mode adds hard checks for contract completeness, UI schema mapping, Review Gate readiness, structured review-agent conclusions, and triggered E2E / visual evidence.
 
 ## Review Rules
 

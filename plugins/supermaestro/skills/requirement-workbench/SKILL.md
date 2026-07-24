@@ -1,24 +1,24 @@
 ---
 name: requirement-workbench
-description: 当用户接到一个新的软件需求，希望 Codex 收集 PRD、接口文档、蓝湖/UI、mock、截图或其他研发物料，生成 documents/<需求名>/source + workbench 工作台，按需调用 lanhu-export 和 prd-structure，并初始化 mission-control 停在需求对齐确认时使用。
+description: 当用户接到新的软件需求，希望 Codex 收集 PRD、接口文档、蓝湖/UI、mock、截图或其他研发物料，生成需求同名目录下的 source 和 workbench，按需调用 lanhu-export、prd-structure，并初始化 mission-control，停在需求对齐确认阶段时使用。
 ---
 
 # 需求工作台
 
-把零散需求物料整理成可交给 `mission-control` 推进的需求工作台。本 skill 只做轻量入口和流程路由；蓝湖导出、PRD 结构化和任务编排细节交给插件内的专用 skills。
+把零散需求物料整理成可交给 `mission-control` 推进的需求工作台。本能力只做轻量入口和流程路由；蓝湖导出、PRD 结构化和任务编排细节交给插件内的专用能力。
 
 ## 原则
 
 - 默认使用中文输出。
 - 需求接收后必须初始化 SuperMaestro 机器状态：`workbench/state.json`、`workbench/events.jsonl` 和 `workbench/mission.state.json`。
-- 工作台 Markdown 是人类审阅投影；关键 Gate 和动作状态以 `scripts/supermaestro.js` 维护的机器状态为准。
+- 工作台 Markdown 是供人工审阅的投影；关键门禁和动作状态以 `scripts/supermaestro.js` 维护的机器状态为准。
 - 原始物料保持不改，统一放在 `documents/<需求同名目录>/source/`。
 - 过程产物统一放在 `documents/<需求同名目录>/workbench/`。
 - 遇到蓝湖 stage 链接、版本分组或 UI schema 导出需求时，使用 `$lanhu-export`。
 - 遇到中大型、规则复杂、边界不清或后续需要拆任务的 PRD 时，使用 `$prd-structure`。
-- 遇到范围、UI 最终稿、接口契约、跨仓边界或验收口径不清的需求时，Gate 1 前可吸收 `superpowers:brainstorming`，生成集中问题清单辅助用户 review。
-- 需求工作台初始化、Gate Brief、Review Pack、验证记录、worktree 规划和执行控制交给 `$mission-control`。
-- 默认停在 Human Gate 1 需求对齐确认；除非用户明确确认 Gate 1 和 Gate 2，不要进入实现阶段。
+- 遇到范围、UI 最终稿、接口契约、跨仓边界或验收口径不清的需求时，在第 1 道门禁前生成集中问题清单，辅助用户审阅。
+- 需求工作台初始化、门禁简报、审查包、验证记录、Git 工作树规划和执行控制交给 `$mission-control`。
+- 默认停在第 1 道人工门禁的需求对齐确认阶段；除非用户明确确认第 1、2 道门禁，否则不要进入实现阶段。
 
 ## 接收流程
 
@@ -39,28 +39,28 @@ documents/<需求同名目录>/
    - PRD、语雀/飞书/Markdown 导出文本放入 `source/prd/`。
    - Swagger、OpenAPI、Postman、mock、接口说明和后端依赖说明放入 `source/api/`。
    - 蓝湖导出包、`manifest.json`、`schemas/*.json` 和可选图片基线放入 `source/ui/`。
-5. 如果 `source/api/` 中是接口文档地址或 Knife4j/Swagger/OpenAPI/Postman 入口，Gate 1 前必须先尝试解析真实接口清单：优先使用文档页面给出的 OpenAPI JSON；Knife4j 可尝试 `swagger-resources`、`/v3/api-docs`、`/v2/api-docs`；无法访问时在 `workbench/specs/api-spec.md` 标记 blocked/partial 和原因。不要把核心接口发现延后到 F1。
-6. 如果用户提供蓝湖 stage 链接或分组名，调用 `$lanhu-export`，默认以 schema-only 方式导出到 `source/ui/`；只有用户明确要求视觉基线时才导出图片。
+5. 如果 `source/api/` 中是接口文档地址或 Knife4j/Swagger/OpenAPI/Postman 入口，第 1 道门禁前必须先尝试解析真实接口清单：优先使用文档页面给出的 OpenAPI JSON；Knife4j 可尝试 `swagger-resources`、`/v3/api-docs`、`/v2/api-docs`；无法访问时，在 `workbench/specs/api-spec.md` 标记 `blocked` 或 `partial` 并说明原因。`api-spec.md` 保存接口发现明细；进入计划门禁前，把本次范围内的契约结论同步到 `workbench/specs/api-contract.md`，`strict` 模式还要同步到 `workbench/specs/machine/api-contract.json`。不要把核心接口发现延后到 F1。
+6. 如果用户提供蓝湖 stage 链接或分组名，调用 `$lanhu-export`，默认仅导出 schema 到 `source/ui/`；只有用户明确要求视觉基线时才导出图片。
 7. 如果存在 PRD 物料，按需求复杂度调用 `$prd-structure`：轻量/中等 PRD 默认把关键事实并入 `workbench/context.md`，把待确认问题并入 `workbench/plans/progress.md`；只有长文档、截图/OCR 多、规则特别复杂或用户明确需要机器事实包时，才把结构化中间产物放入 `workbench/research/structured-prd/`。不要默认把 `structured-prd.json`、`structured-prd-review.md` 或 `open-questions.md` 放入 `workbench/specs/`。
 8. 运行 `node <plugin-root>/scripts/supermaestro.js init documents/<需求同名目录>/workbench --name "<需求名>"` 初始化机器状态。
 9. 调用 `$mission-control` 初始化或刷新工作台，先生成 `workbench/specs/requirement-alignment.md`：用业务语言复述需求，列出范围内/范围外、规则、例子、AI 推断、待确认项和验收场景。
-10. 同时存在 API 物料和 UI 物料时，必须生成 `workbench/specs/page-contract-matrix.md`：把页面/模块、PRD source_ref、UI 画板/schema、接口/mock、公共契约和 RP 逐项绑定；多页面需求没有该矩阵不得进入 Gate 1。
-11. 如果 Gate 1 仍存在需要用户判断的模糊点，先读取并使用 `superpowers:brainstorming`，生成 `workbench/specs/gate-1-brainstorming-questions.md`：问题必须成组、可回答、能反向更新主工作台文档，避免把问题散落在对话里。
-12. 用户回答问题后，必须把答案 fan-in 回 `context.md`、`specs/requirement-alignment.md`、`plans/progress.md`，如果存在页面/接口/UI 联动则同步更新 `specs/page-contract-matrix.md`；问题清单只作为审阅记录，不能成为唯一事实源。
-13. 输出简短的 Gate 1 Requirement Alignment Brief，只确认需求理解、范围、规则、例子、推断项和验收场景；不要在 Gate 1 用任务计划细节替代需求对齐。
-14. Gate 1 通过后再生成或确认任务计划、进度表、Review Pack 骨架和验证报告，并进入 Gate 2 计划确认。
+10. 同时存在 API 物料和 UI 物料时，必须生成 `workbench/specs/page-contract-matrix.md`：把页面或模块、PRD `source_ref`、UI 画板或 schema、接口或 mock、公共契约和 RP 逐项绑定；多页面需求没有该矩阵不得进入第 1 道门禁。
+11. 如果第 1 道门禁仍存在需要用户判断的模糊点，生成 `workbench/specs/gate-1-brainstorming-questions.md`：问题必须成组、可回答、能反向更新主工作台文档，避免把问题散落在对话里。
+12. 用户回答问题后，必须把答案汇总回写到 `context.md`、`specs/requirement-alignment.md`、`plans/progress.md`；如果存在页面、接口和 UI 联动，则同步更新 `specs/page-contract-matrix.md`。问题清单只作为审阅记录，不能成为唯一事实源。
+13. 输出简短的第 1 道门禁需求对齐简报，只确认需求理解、范围、规则、例子、推断项和验收场景；不要在第 1 道门禁用任务计划细节替代需求对齐。
+14. 第 1 道门禁通过后，再生成或确认任务计划、进度表、审查包骨架和验证报告，并进入第 2 道门禁的计划确认阶段。
 
 ## 边界
 
-- 在获得对应的 `mission-control` Gate 确认前，不要开始编码、创建 worktree、派发子 agent、commit、merge、push 或清理 worktree。Gate 1 只能在用户明确确认需求对齐后批准；Gate 2 只能在用户明确确认任务计划和执行模式后批准；两个命令都必须记录 `--confirmed-by user --confirmation "<用户确认原话或摘要>"`。
-- 不要把结构化 PRD 中间产物或 Gate 1 brainstorming 问题清单当成唯一事实源；必须保留 `source_ref`，并确保原始 PRD/API/UI/用户回答可回溯。轻量需求优先把可执行事实写入 `context.md`、`specs/requirement-alignment.md`、`plans/task-plan.md` 和 `plans/progress.md`，避免在 `specs/` 堆放不会被编码直接引用的过程文件。
+- 在获得对应的 `mission-control` 门禁确认前，不要开始编码、创建 Git 工作树、派发子智能体、执行 `commit`、`merge`、`push` 或清理 Git 工作树。第 1 道门禁只能在用户明确确认需求对齐后批准；第 2 道门禁只能在用户明确确认任务计划和执行模式后批准；两个命令都必须记录 `--confirmed-by user --confirmation "<用户确认原话或摘要>"`。
+- 不要把结构化 PRD 中间产物或第 1 道门禁的集中讨论问题清单当成唯一事实源；必须保留 `source_ref`，并确保原始 PRD、API、UI 和用户回答可回溯。轻量需求优先把可执行事实写入 `context.md`、`specs/requirement-alignment.md`、`plans/task-plan.md` 和 `plans/progress.md`，避免在 `specs/` 堆放不会被编码直接引用的过程文件。
 - 不要自行发挥 UI 细节。只要存在 `source/ui/manifest.json` 和 `schemas/*.json`，就把 Sketch Data 作为 UI 主事实源，并遵守 `$mission-control` 的 UI 规则。
-- 不要把接口地址当成已确认接口契约；能解析时必须在 Gate 1 前解析并分类公共接口、页面接口和范围外接口，不能留给实现阶段临时发现。
-- 不要把蓝湖 Cookie、token、账号、私有链接等敏感信息写入 manifest、报告或最终回复。
-- 物料缺失但风险较低时，可以说明假设并继续规划；如果缺失信息会影响范围、最终画板绑定、接口契约、权限、奖励、发布安全或验收结论，必须在 Gate 1 标为阻塞确认项。
+- 不要把接口地址当成已确认的接口契约；能解析时必须在第 1 道门禁前解析并分类公共接口、页面接口和范围外接口，不能留给实现阶段临时发现。
+- 不要把蓝湖 Cookie、令牌、账号、私有链接等敏感信息写入 manifest、报告或最终回复。
+- 物料缺失但风险较低时，可以说明假设并继续规划；如果缺失信息会影响范围、最终画板绑定、接口契约、权限、奖励、发布安全或验收结论，必须在第 1 道门禁标为阻塞确认项。
 
 ## 推荐提示词
 
 ```text
-使用 $requirement-workbench 处理这个需求：PRD 在 <path/link>，接口文档在 <path/link>，蓝湖链接是 <url>，目标仓库是 <repo>。请生成 documents/<需求名>/source 和 workbench，先停在 Gate 1 需求对齐确认。
+使用 $requirement-workbench 处理这个需求：PRD 在 <path/link>，接口文档在 <path/link>，蓝湖链接是 <url>，目标仓库是 <repo>。请生成 documents/<需求名>/source 和 workbench，先停在第 1 道门禁的需求对齐确认阶段。
 ```

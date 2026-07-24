@@ -6,7 +6,7 @@
 - 共享上下文：workbench/context.md
 - 主控进度：workbench/plans/progress.md（只读；不得修改）
 - 规格：
-- 执行技能：编码任务按任务卡使用 `superpowers:test-driven-development`；遇到失败使用 `superpowers:systematic-debugging`；本 agent 只处理任务卡边界内工作。
+- 执行纪律：编码任务按任务卡记录 TDD 决策；遇到失败先记录复现和根因再做最小修复；本 agent 只处理任务卡边界内工作。
 
 ## 执行环境
 
@@ -17,7 +17,7 @@
 - 自动提交 feature：no
 - Foundation human-approved 后 checkpoint commit 授权：
 - Worktree 可运行性准备：每个 worktree install / 完整项目拷贝 / 仅静态验证
-- 执行方式：SDD worker / 主控串行 / executing-plans fallback
+- 执行方式：worker agent / 主控串行
 - TDD 适用性：required / not-applicable / deferred
 - 调试纪律：bug / test failure / build failure / integration failure / review finding 时必须先根因调查
 

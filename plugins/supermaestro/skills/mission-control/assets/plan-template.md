@@ -10,7 +10,7 @@
 - 进度同步：`plans/progress.md`
 - Review artifact：worktree diff / patch / PR / explicit local commit
 - Foundation baseline：none / checkpoint commit after human approval
-- Superpowers 执行增强：writing-plans 粒度 / SDD / executing-plans fallback / TDD worker discipline
+- 执行纪律：可验收任务粒度 / worker 边界 / TDD 决策 / 根因调试 / 新鲜验证
 
 ## 事实源
 
@@ -40,7 +40,7 @@
 
 ## 任务颗粒度要求
 
-每个编码任务必须按 `superpowers:writing-plans` 的粒度写清：
+每个编码任务必须按以下可验收粒度写清：
 
 - 修改文件和测试文件。
 - 关键实现步骤。
@@ -61,14 +61,14 @@
 - Worktree：yes / no；root：
 - Subagents：yes / no；仅真实外部 agent/thread 才生成 `agents/`
 - Review agents：yes / no；仅只读审查真实 RP 时生成 `reviews/code-review/`
-- SDD：yes / no；真实多 agent 且任务独立时默认 yes
-- executing-plans fallback：yes / no；仅不开 subagent、跨会话或串行执行已有计划时使用
+- Worker agents：yes / no；仅真实多 agent 且任务独立时启用
+- 主控串行：yes / no；不开 subagent、跨会话或串行执行已有计划时使用
 - TDD worker discipline：required / partially-required / not-applicable；说明：
-- systematic-debugging：失败/bug/review finding 时 required
-- requesting-code-review：Review Agent Checkpoint yes / no
-- receiving-code-review：changes-requested 时 required
-- verification-before-completion：Gate 2 / Gate 3 / completion claims required
-- finishing-a-development-branch：Gate 4 final action required
+- 根因调试：失败/bug/review finding 时 required
+- Review Agent Checkpoint：yes / no
+- Review finding 处理：changes-requested 时 required
+- 完成前验证：Gate 2 / Gate 3 / completion claims required
+- 分支与 worktree 收尾：Gate 4 final action required
 - Contract changes：yes / no；仅真实契约变更才生成 `contract-changes/`
 - Integration：yes / no；仅独立集成分支/计划才生成 `integration/`
 - 不生成的模块和原因：
@@ -95,7 +95,7 @@
 - Review 成本：
 - Foundation Checkpoint：拆分、放行条件、checkpoint commit 和下游 base
 - Review Agent Checkpoint：每个 worker 完成后新开只读 review agent；如关闭，说明风险
-- Superpowers 执行增强：writing-plans 颗粒度、SDD 或 executing-plans fallback、TDD 覆盖范围和跳过条件
+- 执行纪律：任务颗粒度、worker agents 或主控串行、TDD 覆盖范围和跳过条件
 - 调试与 review 纪律：失败时根因调查；review agent 输入结构；review findings 核实与处理方式
 - 完成与收尾纪律：Gate 3/Gate 4 前新鲜验证证据；Gate 4 final action 菜单、环境判断和清理边界
 - 启用模块：

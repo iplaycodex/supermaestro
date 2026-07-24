@@ -13,22 +13,6 @@
 | --- | --- | --- | --- |
 |  |  | pending |  |
 
-## Superpowers 调用证据
-
-> SuperMaestro 脚本会把这里作为硬闸门证据源之一。只写计划不算调用；必须先实际读取/调用对应 `superpowers:*` skill，再记录证据。
-
-| Skill | 触发场景 | 结果 | 证据 |
-| --- | --- | --- | --- |
-| `superpowers:writing-plans` | Gate 2 任务计划 | pending / 已读取并吸收 |  |
-| `superpowers:test-driven-development` | 编码任务或行为变更 | pending / 已读取并吸收 / not-applicable |  |
-| `superpowers:subagent-driven-development` | Gate 2 启用真实子 agent | pending / 已读取并执行 / not-needed |  |
-| `superpowers:executing-plans` | 未启用子 agent 的串行执行 | pending / 已读取并执行 / not-needed |  |
-| `superpowers:systematic-debugging` | bug、测试失败、构建失败、联调异常或行为 review finding | pending / 已读取并执行 / not-needed |  |
-| `superpowers:requesting-code-review` | Review Agent Checkpoint | pending / 已读取并执行 / not-needed |  |
-| `superpowers:receiving-code-review` | changes-requested 处理 | pending / 已读取并执行 / not-needed |  |
-| `superpowers:verification-before-completion` | Gate 3/Gate 4/完成声明前 | pending / 已读取并执行 |  |
-| `superpowers:finishing-a-development-branch` | Gate 4 final action | pending / 已读取并执行 / not-needed |  |
-
 ## 完成前验证
 
 | 声明/动作 | 证明命令 | 执行时间 | Exit code | 输出摘要 | 结论 |

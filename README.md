@@ -18,7 +18,6 @@ SuperMaestro 支持三种模式：
 - `specs/` 顶层放人类主文档，`specs/machine/` 放机器 contract JSON。
 - Markdown 是人类审阅投影。
 - CLI enforcement 强于 prompt 规则。
-- Superpowers 默认作为 `superpowers` policy pack 启用。
 - Artifact 按 trigger 生成，不为了完整性生成空文档。
 - E2E / 视觉验证先在 validation contract 中声明必测 case，再用结构化 evidence 记录实际执行结果。
 
@@ -30,7 +29,6 @@ node plugins/supermaestro/scripts/supermaestro.js scaffold documents/demo/workbe
 node plugins/supermaestro/scripts/supermaestro.js check-workbench documents/demo/workbench
 node plugins/supermaestro/scripts/supermaestro.js check-contracts documents/demo/workbench
 node plugins/supermaestro/scripts/supermaestro.js approve-scope documents/demo/workbench --confirmed-by user --confirmation "用户确认需求理解和范围"
-node plugins/supermaestro/scripts/supermaestro.js evidence documents/demo/workbench --type skill.used --skill superpowers:writing-plans --phase plan --summary "已应用 writing-plans 拆分任务"
 node plugins/supermaestro/scripts/supermaestro.js approve-plan documents/demo/workbench --mode main-serial --confirmed-by user --confirmation "用户确认计划和执行模式"
 node plugins/supermaestro/scripts/supermaestro.js check documents/demo/workbench --action code --non-ui true --reason "只改接口逻辑不涉及视觉"
 node plugins/supermaestro/scripts/supermaestro.js verify documents/demo/workbench --strict true
@@ -102,18 +100,6 @@ node plugins/supermaestro/scripts/supermaestro.js evidence documents/demo/workbe
 `request-review`、`approve-review`、`request-final`、`approve-final` 都会重新运行 `verify`，防止 Gate 等待期间契约、证据或产物发生变化。
 
 最终动作也不会复用旧验证：`check --action commit|merge|push|cleanup` 会在授权前再次运行 `verify`。
-
-## Superpowers policy
-
-SuperMaestro 默认启用 `plugins/supermaestro/policies/superpowers.policy.json`。Core workflow 不直接硬编码每个阶段的 Superpowers 要求，而是通过 policy 检查 evidence。
-
-机器证据优先记录到：
-
-```text
-workbench/reports/evidence.jsonl
-```
-
-迁移期仍兼容 `reports/validation.md`、`plans/task-plan.md`、`plans/progress.md` 和 `reviews/review-packs.md` 中的旧式文本证据。
 
 ## 收尾规则 / Strict mode
 

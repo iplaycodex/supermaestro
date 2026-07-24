@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const {
   collectValidationContractIssues,
   collectValidationEvidenceIssues,
@@ -18,11 +19,8 @@ const {
 const WORKFLOW_VERSION = 2;
 const VALID_MODES = new Set(['lite', 'standard', 'strict']);
 const DEFAULT_MODE = 'standard';
-const DEFAULT_POLICY = 'superpowers';
-const POLICY_DIR = path.join(__dirname, '..', 'policies');
 const GENERATED_WORKBENCH_DIRS = new Set(['gates', 'plans', 'reports', 'reviews', 'specs', 'ui', 'workbench']);
 const API_MATERIAL_NAME_RE = /(api|swagger|openapi|postman|mock|interface|interfaces|接口|后端|联调|knife4j)/i;
-const SUPERPOWER_EVIDENCE_RE = /(已读取|已调用|已使用|已吸收|已执行|已完成|used|loaded|applied|executed|completed)/i;
 
 const GATE_ALIASES = {
   gate1: 'scope',
@@ -54,17 +52,10 @@ const DEFAULT_STATE = {
     subagents: false,
     checkpoint: false
   },
-  policies: {
-    [DEFAULT_POLICY]: {
-      enabled: true,
-      enforcement: 'hard'
-    }
-  },
   checks: {
     workbench: 'unknown',
     reviewability: 'unknown',
-    validation: 'unknown',
-    policy: 'unknown'
+    validation: 'unknown'
   },
   artifacts: {}
 };
@@ -179,14 +170,16 @@ function init(workbench, options) {
 
   state.workflowVersion = state.workflowVersion || WORKFLOW_VERSION;
   state.mode = normalizeMode(options.mode || state.mode || DEFAULT_MODE);
-  state.policies = normalizePolicies(options, state.policies);
   state.artifacts = state.artifacts || {};
   state.checks = state.checks || deepClone(DEFAULT_STATE.checks);
+  delete state.policies;
+  delete state.checks.policy;
+  delete state.checks.policyMissing;
   state.updatedAt = now();
 
   saveState(workbench, state);
   writeProjection(workbench, state);
-  appendEvent(workbench, 'init', { name: state.name, mode: state.mode, policies: state.policies });
+  appendEvent(workbench, 'init', { name: state.name, mode: state.mode });
 
   if (readBoolean(options.scaffold, false)) {
     scaffold(workbench, options);
@@ -216,25 +209,6 @@ function normalizeMode(mode) {
   return value;
 }
 
-function normalizePolicies(options, existingPolicies) {
-  const policies = { ...(existingPolicies || {}) };
-  const names = String(options.policies || options.policy || DEFAULT_POLICY)
-    .split(',')
-    .map(item => item.trim())
-    .filter(Boolean);
-  const enforcement = options.policyEnforcement || options.enforcement || 'hard';
-  for (const name of names) {
-    policies[name] = {
-      enabled: !['false', 'off', 'disabled'].includes(String(options[`${name}Enabled`] || 'true').toLowerCase()),
-      enforcement: ['hard', 'warn', 'off'].includes(String(enforcement).toLowerCase()) ? String(enforcement).toLowerCase() : 'hard'
-    };
-  }
-  if (!Object.keys(policies).length) {
-    policies[DEFAULT_POLICY] = { enabled: true, enforcement: 'hard' };
-  }
-  return policies;
-}
-
 function status(workbench) {
   const state = requireState(workbench);
   console.log(`Name: ${state.name}`);
@@ -245,7 +219,6 @@ function status(workbench) {
   console.log(`Review: ${state.gates.gate3}`);
   console.log(`Final: ${state.gates.gate4}`);
   console.log(`Mode: ${state.execution?.mode || '-'}`);
-  console.log(`Policies: ${enabledPolicyNames(state).join(', ') || '-'}`);
   console.log(`Workbench: ${workbench}`);
 }
 
@@ -737,7 +710,6 @@ function approvePlan(workbench, options) {
   if (isStrict(state)) {
     checkContracts(workbench, { strict: true, phase: 'plan' });
   }
-  validatePolicyEvidence(workbench, 'gate.plan.approve', 'approve-plan');
 
   const nextState = requireState(workbench);
   nextState.phase = 'plan_approved';
@@ -781,7 +753,6 @@ function checkAction(workbench, options) {
         validateUiSchemaMapping(workbench, options.schemaExtract, options.schemaMap || 'specs/ui-schema-map.md');
       }
     }
-    validatePolicyEvidence(workbench, 'action.code', 'code');
     console.log('ALLOW code');
     return;
   }
@@ -791,7 +762,6 @@ function checkAction(workbench, options) {
     if (state.execution?.subagents !== true) {
       throw new Error('Gate 2 execution mode did not enable subagents.');
     }
-    validatePolicyEvidence(workbench, 'action.dispatch-subagent', 'dispatch-subagent');
     console.log('ALLOW dispatch-subagent');
     return;
   }
@@ -799,7 +769,6 @@ function checkAction(workbench, options) {
   if (['commit', 'merge', 'push', 'cleanup'].includes(action)) {
     requireGate(state, 'gate4');
     verify(workbench, {});
-    validatePolicyEvidence(workbench, 'action.final', action);
     console.log(`ALLOW ${action}`);
     return;
   }
@@ -817,36 +786,40 @@ function verify(workbench, options) {
   if (!isLite(state)) required.unshift(reviewPack);
   const missing = required.filter(file => !hasNonEmptyFile(path.join(workbench, file)));
 
-  const policyResult = checkPolicyEvidence(workbench, 'gate.review.request');
-  const hardPolicyFailures = policyResult.failures.filter(item => item.enforcement === 'hard');
   const strictContractFailures = isStrict(state) ? checkContracts(workbench, { strict: true, phase: 'review', silent: true }).failures : [];
   const strictReviewFailures = isStrict(state) ? validateStrictReviewReadiness(workbench) : [];
   const testEvidenceFailures = validateStructuredTestEvidence(workbench, state);
+  const readiness = validateCompletionReadiness(workbench, state, {
+    reviewPack,
+    validation
+  });
+  const completionReadinessFailures = readiness.validationFailures;
+  const reviewReadinessFailures = readiness.reviewFailures;
+  const reviewPackMissing = !isLite(state) && missing.includes(reviewPack);
 
-  state.checks.reviewability = missing.length ? 'failed' : 'passed';
-  state.checks.validation = missing.length || hardPolicyFailures.length || strictContractFailures.length || strictReviewFailures.length || testEvidenceFailures.length ? 'failed' : 'passed';
+  state.checks.reviewability = reviewPackMissing || strictReviewFailures.length || reviewReadinessFailures.length ? 'failed' : 'passed';
+  state.checks.validation = missing.length || strictContractFailures.length || strictReviewFailures.length || testEvidenceFailures.length || completionReadinessFailures.length || reviewReadinessFailures.length ? 'failed' : 'passed';
   state.checks.verifyMissing = missing;
-  state.checks.policyMissing = policyResult.failures;
   state.checks.contractMissing = strictContractFailures;
   state.checks.strictReviewMissing = strictReviewFailures;
   state.checks.testEvidenceMissing = testEvidenceFailures;
+  state.checks.completionReadinessMissing = completionReadinessFailures;
+  state.checks.reviewReadinessMissing = reviewReadinessFailures;
 
-  if (missing.length || hardPolicyFailures.length || strictContractFailures.length || strictReviewFailures.length || testEvidenceFailures.length) {
+  if (missing.length || strictContractFailures.length || strictReviewFailures.length || testEvidenceFailures.length || completionReadinessFailures.length || reviewReadinessFailures.length) {
     state.updatedAt = now();
     saveState(workbench, state);
     appendEvent(workbench, 'verify', {
       strict: readBoolean(options.strict, false),
       result: 'failed',
       missing,
-      policyMissing: policyResult.failures,
       contractMissing: strictContractFailures,
       strictReviewMissing: strictReviewFailures,
-      testEvidenceMissing: testEvidenceFailures
+      testEvidenceMissing: testEvidenceFailures,
+      completionReadinessMissing: completionReadinessFailures,
+      reviewReadinessMissing: reviewReadinessFailures
     });
     const fileText = missing.length ? `Missing or empty: ${missing.join(', ')}` : '';
-    const policyText = hardPolicyFailures.length
-      ? `Missing policy evidence: ${hardPolicyFailures.map(item => item.label).join(', ')}`
-      : '';
     const contractText = strictContractFailures.length
       ? `Contract failures: ${strictContractFailures.map(item => item.message).join(', ')}`
       : '';
@@ -856,7 +829,13 @@ function verify(workbench, options) {
     const evidenceText = testEvidenceFailures.length
       ? `Validation evidence failures: ${testEvidenceFailures.join(', ')}`
       : '';
-    throw new Error(`Verify failed. ${[fileText, policyText, contractText, reviewText, evidenceText].filter(Boolean).join('; ')}`);
+    const completionText = completionReadinessFailures.length
+      ? `Completion readiness failures: ${completionReadinessFailures.join(', ')}`
+      : '';
+    const reviewReadinessText = reviewReadinessFailures.length
+      ? `Review readiness failures: ${reviewReadinessFailures.join(', ')}`
+      : '';
+    throw new Error(`Verify failed. ${[fileText, contractText, reviewText, evidenceText, completionText, reviewReadinessText].filter(Boolean).join('; ')}`);
   }
 
   validateVisualEvidence(workbench, validation, state);
@@ -865,14 +844,10 @@ function verify(workbench, options) {
   appendEvent(workbench, 'verify', {
     strict: readBoolean(options.strict, false),
     result: 'passed',
-    missing,
-    warnings: policyResult.failures.filter(item => item.enforcement === 'warn')
+    missing
   });
 
   console.log('Verify passed.');
-  if (policyResult.failures.some(item => item.enforcement === 'warn')) {
-    console.log(`Warnings: ${policyResult.failures.map(item => item.label).join(', ')}`);
-  }
 }
 
 function requestReview(workbench, options) {
@@ -930,7 +905,6 @@ function requestFinal(workbench, options) {
     requireGate(state, 'gate3');
   }
   verify(workbench, options);
-  validatePolicyEvidence(workbench, 'gate.final.request', 'request-final');
   state.phase = 'final_pending';
   state.gates.gate4 = 'final_requested';
   state.updatedAt = now();
@@ -949,7 +923,6 @@ function approveFinal(workbench, options) {
   requireUserConfirmation(options, 'Final gate');
   verify(workbench, {});
   state = requireState(workbench);
-  validatePolicyEvidence(workbench, 'gate.final.approve', 'approve-final');
   state.phase = 'final_approved';
   state.gates.gate4 = 'approved';
   state.finalActions = {
@@ -968,28 +941,21 @@ function approveFinal(workbench, options) {
 
 function addEvidenceCommand(workbench, options) {
   requireState(workbench);
-  const type = options.type || 'skill.used';
+  const type = options.type || 'note';
   const entry = type.startsWith('test.')
     ? createStructuredTestEvidence(workbench, options)
     : {
         type,
         at: now(),
         phase: options.phase || '',
-        skill: options.skill || '',
         command: options.command || '',
         result: options.result || '',
         summary: options.summary || options.reason || '',
         source: options.source || 'agent'
       };
-  if (type.startsWith('skill.') && !entry.skill) {
-    throw new Error('Skill evidence requires --skill.');
-  }
-  if (type === 'skill.skipped' && !entry.summary) {
-    throw new Error('Skipped skill evidence requires --summary or --reason.');
-  }
   appendEvidence(workbench, entry);
-  appendEvent(workbench, 'evidence.added', { type: entry.type, skill: entry.skill, phase: entry.phase });
-  console.log(`Evidence added: ${entry.type}${entry.skill ? ` ${entry.skill}` : ''}`);
+  appendEvent(workbench, 'evidence.added', { type: entry.type, phase: entry.phase });
+  console.log(`Evidence added: ${entry.type}`);
 }
 
 function createStructuredTestEvidence(workbench, options) {
@@ -1164,100 +1130,155 @@ function validatePlanWorkbench(workbench) {
   if (missing.length) {
     throw new Error(`Plan gate check failed. Missing or empty: ${missing.join(', ')}`);
   }
-}
-
-function enabledPolicyNames(state) {
-  return Object.entries(state.policies || {})
-    .filter(([, config]) => config && config.enabled !== false && config.enforcement !== 'off')
-    .map(([name]) => name);
-}
-
-function loadPolicy(name) {
-  const file = path.join(POLICY_DIR, `${name}.policy.json`);
-  if (!fs.existsSync(file)) {
-    throw new Error(`Policy not found: ${name} (${file})`);
+  const taskPlan = fs.readFileSync(path.join(workbench, 'plans', 'task-plan.md'), 'utf8');
+  if (/(?:\bpending\b|TODO|待补|待确认)/i.test(taskPlan)) {
+    throw new Error('Plan gate check failed. plans/task-plan.md still contains unresolved template placeholders.');
   }
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-function checkPolicyEvidence(workbench, eventName) {
-  const state = requireState(workbench);
-  const failures = [];
-  const warnings = [];
-  for (const [name, config] of Object.entries(state.policies || {})) {
-    if (!config || config.enabled === false || config.enforcement === 'off') continue;
-    const policy = loadPolicy(name);
-    const requirements = requirementsForEvent(policy, eventName, state);
-    for (const requirement of requirements) {
-      if (!matchesWhen(requirement.when, state)) continue;
-      const result = checkRequirementEvidence(workbench, requirement);
-      if (result.ok) continue;
-      const enforcement = requirement.enforcement || config.enforcement || policy.defaultEnforcement || 'hard';
-      const item = {
-        policy: name,
-        event: eventName,
-        label: result.label,
-        enforcement
-      };
-      failures.push(item);
-      if (enforcement === 'warn') warnings.push(item);
+function validateCompletionReadiness(workbench, state, refs) {
+  const validationFailures = [];
+  const reviewFailures = [];
+  const validationFile = resolveWorkbenchRef(workbench, refs.validation);
+  if (hasNonEmptyFile(validationFile)) {
+    const content = fs.readFileSync(validationFile, 'utf8');
+    if (hasUnresolvedTemplatePlaceholder(content)) {
+      validationFailures.push(`${refs.validation} still contains unresolved template placeholders.`);
+    }
+    if (!hasResolvedTddDecision(content)) {
+      validationFailures.push(`${refs.validation} must record a resolved TDD applicability decision or skip reason.`);
+    }
+    if (!hasCompletedVerificationRecord(content)) {
+      validationFailures.push(`${refs.validation} must contain one executed completion-verification record with its command or manual check and a passing result.`);
     }
   }
-  return { failures, warnings };
+
+  if (!isLite(state)) {
+    const reviewPackFile = resolveWorkbenchRef(workbench, refs.reviewPack);
+    if (hasNonEmptyFile(reviewPackFile)) {
+      const content = fs.readFileSync(reviewPackFile, 'utf8');
+      if (hasUnresolvedTemplatePlaceholder(content)) {
+        reviewFailures.push(`${refs.reviewPack} still contains unresolved template placeholders.`);
+      }
+      if (!hasConcreteReviewArtifact(content, workbench)) {
+        reviewFailures.push(`${refs.reviewPack} must point to a concrete diff command, existing patch or branch, or numbered pull request.`);
+      }
+    }
+  }
+
+  return { validationFailures, reviewFailures };
 }
 
-function validatePolicyEvidence(workbench, eventName, action) {
-  const result = checkPolicyEvidence(workbench, eventName);
-  const hardFailures = result.failures.filter(item => item.enforcement === 'hard');
-  const warnFailures = result.failures.filter(item => item.enforcement === 'warn');
-  const state = requireState(workbench);
-  state.checks = { ...(state.checks || {}) };
-  state.checks.policy = hardFailures.length ? 'failed' : 'passed';
-  state.checks.policyMissing = result.failures;
-  state.updatedAt = now();
-  saveState(workbench, state);
-  appendEvent(workbench, 'policy.check', { event: eventName, result: hardFailures.length ? 'failed' : 'passed', failures: result.failures });
-  if (hardFailures.length) {
-    throw new Error(
-      `DENY ${action}: 缺少 policy evidence：${hardFailures.map(item => item.label).join(', ')}。请先实际读取/调用对应 skill，并记录到 reports/evidence.jsonl；迁移期也兼容 reports/validation.md。`
-    );
+function hasUnresolvedTemplatePlaceholder(content) {
+  let resultColumns = [];
+  const lines = content.split(/\r?\n/);
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    const value = line.trim();
+    if (!value) {
+      resultColumns = [];
+      continue;
+    }
+    if (/^(?:[-*]\s*)?(?:[A-Za-z\u4e00-\u9fff _/-]+\s*[:：]\s*)?(?:pending|TODO|待补|待确认)[。.]*$/i.test(value)) {
+      return true;
+    }
+    const cells = markdownCells(value);
+    if (cells.length < 2) continue;
+    if (cells.every(cell => /^:?-{3,}:?$/.test(cell))) continue;
+    const nextCells = markdownCells(lines[lineIndex + 1] || '');
+    const followedBySeparator = nextCells.length === cells.length &&
+      nextCells.every(cell => /^:?-{3,}:?$/.test(cell));
+    if (followedBySeparator) {
+      resultColumns = cells
+        .map((cell, index) => /^(?:结果|result|状态|status)$/i.test(cell) ? index : -1)
+        .filter(index => index >= 0);
+      continue;
+    }
+    if (resultColumns.some(index => /^(?:pending|TODO|待补|待确认)[。.]*$/i.test(cells[index] || ''))) {
+      return true;
+    }
+    const placeholders = cells.filter(cell => /^(?:pending|TODO|待补|待确认)[。.]*$/i.test(cell)).length;
+    if (placeholders >= 2 && placeholders >= Math.ceil(cells.length / 2)) return true;
   }
-  if (warnFailures.length) {
-    console.log(`Policy warnings: ${warnFailures.map(item => item.label).join(', ')}`);
-  }
+  return false;
 }
 
-function requirementsForEvent(policy, eventName, state) {
-  const requirements = policy.requirements || {};
-  const mode = normalizeMode(state.mode || DEFAULT_MODE);
-  const common = asArray(requirements[eventName]);
-  const byMode = asArray(requirements[`${eventName}#${mode}`]);
-  return common.concat(byMode);
+function hasResolvedTddDecision(content) {
+  return content.split(/\r?\n/).some(line => {
+    if (!/(?:TDD|测试驱动)/i.test(line)) return false;
+    if (/(?:未评估|未决定|待评估|待确认)/i.test(line)) return false;
+    if (/(?:TDD|测试驱动)[^：:\n]{0,20}[:：]\s*(?:未评估|未决定|待评估|待确认|pending|TODO)/i.test(line)) return false;
+    return /(?:适用|不适用|跳过|延后|RED|GREEN|required|not[- ]applicable|skipped|deferred)/i.test(line);
+  });
 }
 
-function checkRequirementEvidence(workbench, requirement) {
-  if (requirement.skill) {
-    const ok = hasSkillEvidence(workbench, requirement.skill, requirement.allowSkipWithReason);
-    return { ok, label: requirement.skill };
-  }
-  if (requirement.oneOf) {
-    const skills = asArray(requirement.oneOf);
-    const ok = skills.some(skill => hasSkillEvidence(workbench, skill, requirement.allowSkipWithReason));
-    return { ok, label: `one of ${skills.join(' | ')}` };
-  }
-  return { ok: true, label: 'unknown requirement' };
+function hasCompletedVerificationRecord(content) {
+  const negative = /(?:未执行|未运行|没有执行|未完成|未通过|预期通过|expected\s+to\s+pass|not\s+passed|not\s+successful|\bunsuccessful\b|\bblocked\b|\bskipped\b|\bfailed\b|失败)/i;
+  const passing = /(?:\bpassed\b|\bpass\b|\bsuccess(?:ful)?\b|通过|成功|exit\s*(?:code)?\s*[:=]?\s*0|0\s+failed|无失败)/i;
+  const completion = /(?:完成前验证|fresh verification|completion verification|verification before completion)/i;
+
+  return content.split(/\r?\n/).some(line => {
+    const value = line.trim();
+    if (!value || negative.test(value)) return false;
+
+    if (completion.test(value)) {
+      const actionMatch = value.match(/(?:运行|执行|命令|command|manual\s+(?:check|review|verification))\s*[:：]?\s*([^，,；;|]+)/i);
+      return Boolean(actionMatch && actionMatch[1].trim().length >= 3 && passing.test(value));
+    }
+
+    const cells = markdownCells(value);
+    if (cells.length < 2 || cells.some(cell => negative.test(cell))) return false;
+    const resultIndex = cells.findIndex(cell => passing.test(cell));
+    if (resultIndex <= 0) return false;
+    const command = cells.slice(0, resultIndex).find(cell => {
+      return cell.length >= 3 &&
+        !/^(?:命令|command|验证项|类型|状态|结果|result)$/i.test(cell) &&
+        !/^[-:]+$/.test(cell);
+    });
+    return Boolean(command);
+  });
 }
 
-function hasSkillEvidence(workbench, skill, allowSkipWithReason) {
-  const evidence = readEvidence(workbench);
-  const structured = evidence.some(entry => {
-    if (entry.skill !== skill) return false;
-    if (['skill.used', 'skill.applied', 'skill.loaded'].includes(entry.type)) return true;
-    if (allowSkipWithReason && entry.type === 'skill.skipped' && String(entry.summary || entry.reason || '').trim().length >= 6) return true;
+function markdownCells(line) {
+  if (!line.includes('|')) return [];
+  return line
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map(cell => cell.replace(/`/g, '').trim());
+}
+
+function hasConcreteReviewArtifact(content, workbench) {
+  return content.split(/\r?\n/).some(line => {
+    const value = line.trim();
+    if (!value || value.startsWith('#')) return false;
+    if (/\bgit\s+(?:diff|show)\s+(?:--cached|--staged|HEAD|[A-Za-z0-9._/-]+(?:\.{2,3}[A-Za-z0-9._/-]+)?)/i.test(value)) {
+      return true;
+    }
+    if (/https?:\/\/\S+\/(?:pull|pulls)\/\d+\b|\bPR\s*#\d+\b/i.test(value)) {
+      return true;
+    }
+    const patchMatch = value.match(/(?:^|[\s|`])([^|\s`]+\.patch)(?:[\s|`]|$)/i);
+    if (patchMatch) {
+      const candidates = [
+        resolveWorkbenchRef(workbench, patchMatch[1]),
+        path.resolve(process.cwd(), patchMatch[1])
+      ];
+      if (candidates.some(hasNonEmptyFile)) return true;
+    }
+    const branchMatch = value.match(/\bbranch\s*[:=]\s*([A-Za-z0-9._/-]+)/i);
+    if (branchMatch && gitRefExists(branchMatch[1])) return true;
     return false;
   });
-  if (structured) return true;
-  return hasLegacySuperpowerEvidence(superpowerEvidenceText(workbench), skill, allowSkipWithReason);
+}
+
+function gitRefExists(ref) {
+  const result = spawnSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    stdio: 'ignore'
+  });
+  return result.status === 0;
 }
 
 function readEvidence(workbench) {
@@ -1280,44 +1301,6 @@ function appendEvidence(workbench, entry) {
   const file = path.join(workbench, 'reports', 'evidence.jsonl');
   ensureDir(path.dirname(file));
   fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
-}
-
-function superpowerEvidenceText(workbench) {
-  return [
-    path.join(workbench, 'reports', 'validation.md'),
-    path.join(workbench, 'plans', 'task-plan.md'),
-    path.join(workbench, 'plans', 'progress.md'),
-    path.join(workbench, 'reviews', 'review-packs.md')
-  ]
-    .filter(file => fs.existsSync(file))
-    .map(file => fs.readFileSync(file, 'utf8'))
-    .join('\n\n');
-}
-
-function hasLegacySuperpowerEvidence(content, skill, allowSkipWithReason) {
-  const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (allowSkipWithReason) {
-    const skipRe = new RegExp(`${escaped}[\\s\\S]{0,240}(跳过|skip|skipped)[\\s\\S]{0,240}(原因|reason)`, 'i');
-    if (skipRe.test(content)) return true;
-  }
-  const sameLineEvidence = content.split(/\r?\n/).some(line => {
-    return line.includes(skill) && !/pending\s*\//i.test(line) && SUPERPOWER_EVIDENCE_RE.test(line);
-  });
-  if (sameLineEvidence) return true;
-
-  const skillEvidence = new RegExp(`${escaped}[\\s\\S]{0,240}${SUPERPOWER_EVIDENCE_RE.source}`, 'i');
-  const evidenceSkill = new RegExp(`${SUPERPOWER_EVIDENCE_RE.source}[\\s\\S]{0,240}${escaped}`, 'i');
-  const match = content.match(skillEvidence) || content.match(evidenceSkill);
-  return Boolean(match && !/pending\s*\//i.test(match[0]));
-}
-
-function matchesWhen(when, state) {
-  if (!when) return true;
-  for (const [key, expected] of Object.entries(when)) {
-    const actual = key.split('.').reduce((node, part) => node?.[part], state);
-    if (actual !== expected) return false;
-  }
-  return true;
 }
 
 function recommendNext(state) {
@@ -1420,22 +1403,26 @@ function validateStrictReviewReadiness(workbench) {
     .filter(file => fs.existsSync(file))
     .map(file => fs.readFileSync(file, 'utf8'))
     .join('\n\n');
-  if (!/(git diff|diff command|patch|branch|PR|pull request)/i.test(reviewText)) {
+  if (!hasConcreteReviewArtifact(reviewText, workbench)) {
     failures.push('strict Review gate requires review pack to point to a real diff, patch, branch, or PR.');
   }
 
   const state = requireState(workbench);
-  if (state.artifacts?.triggers?.reviewAgent === true || fs.existsSync(path.join(workbench, 'reviews', 'code-review'))) {
-    if (!hasSkillEvidence(workbench, 'superpowers:requesting-code-review', false)) {
-      failures.push('strict Review gate requires superpowers:requesting-code-review evidence when review agent is enabled.');
-    }
-  }
-
-  if (/changes-requested|changes requested/i.test(superpowerEvidenceText(workbench))) {
-    const handled = hasSkillEvidence(workbench, 'superpowers:receiving-code-review', false) ||
-      /(技术性驳回|technical rejection|not applicable|超范围)/i.test(superpowerEvidenceText(workbench));
-    if (!handled) {
-      failures.push('changes-requested review findings require receiving-code-review evidence or explicit technical rejection.');
+  const codeReviewDir = path.join(workbench, 'reviews', 'code-review');
+  if (state.artifacts?.triggers?.reviewAgent === true || fs.existsSync(codeReviewDir)) {
+    const reportFiles = fs.existsSync(codeReviewDir)
+      ? fs.readdirSync(codeReviewDir).filter(name => name.endsWith('.md') && name !== 'README.md')
+      : [];
+    if (!reportFiles.length) {
+      failures.push('strict Review gate requires a review-agent report with agent-approved or not-needed status.');
+    } else {
+      const reports = reportFiles.map(name => fs.readFileSync(path.join(codeReviewDir, name), 'utf8')).join('\n\n');
+      if (/(?:status|状态)\s*[:：]\s*(?:pending|changes-requested)|(?:pending|changes-requested)\s*:\s*yes/i.test(reports)) {
+        failures.push('strict Review gate has unresolved pending or changes-requested review-agent findings.');
+      }
+      if (!/(?:agent-approved|not-needed)(?:\s*:\s*yes|\s*\|)|(?:status|状态)\s*[:：]\s*(?:agent-approved|not-needed)/i.test(reports)) {
+        failures.push('strict Review gate requires a structured agent-approved or not-needed review-agent conclusion.');
+      }
     }
   }
 
@@ -1467,7 +1454,6 @@ function writeProjection(workbench, state) {
     gates: state.gates,
     gateNames: GATE_ALIASES,
     execution: state.execution,
-    policies: state.policies || {},
     artifacts: state.artifacts || {},
     humanConfirmations: state.humanConfirmations || {},
     checks: state.checks,
@@ -1484,7 +1470,6 @@ function writeGateDecision(workbench, gate, state, options, name) {
     mode: state.mode || DEFAULT_MODE,
     gates: state.gates,
     execution: state.execution,
-    policies: state.policies || {},
     options,
     decidedAt: now()
   });
@@ -1500,9 +1485,11 @@ function requireState(workbench) {
   const state = loadState(workbench, null);
   if (!state) throw new Error(`No state found. Run init first: ${workbench}`);
   state.mode = normalizeMode(state.mode || DEFAULT_MODE);
-  state.policies = normalizePolicies({}, state.policies);
   state.checks = state.checks || deepClone(DEFAULT_STATE.checks);
   state.artifacts = state.artifacts || {};
+  delete state.policies;
+  delete state.checks.policy;
+  delete state.checks.policyMissing;
   return state;
 }
 
@@ -1706,11 +1693,6 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function asArray(value) {
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
 function liteBriefTemplate(state) {
   return `# Lite Brief\n\n## 状态\n\n状态：待确认\n确认人：-\n\n## 本次要做\n\n- TODO\n\n## 本次不做\n\n- TODO\n\n## 验证方式\n\n- TODO\n\n## 用户确认摘要\n\n- TODO\n`;
 }
@@ -1719,7 +1701,7 @@ function validationTemplate(_state, triggers = {}) {
   const structured = triggers.e2e || triggers.visual
     ? `\n## 结构化 E2E / Visual Evidence\n\n- Contract: \`specs/machine/validation-contract.json\`\n- E2E required: ${triggers.e2e === true}\n- Visual required: ${triggers.visual === true}\n- Evidence: \`reports/evidence.jsonl\`（\`test.e2e\` / \`test.visual\`）\n`
     : '';
-  return `# 验证报告\n\n## Superpowers / Policy Evidence\n\n结构化证据优先记录到 \`reports/evidence.jsonl\`。迁移期可在此保留人工可读摘要。\n\n## 命令\n\n| 命令 | 结果 | 摘要 |\n| --- | --- | --- |\n| pending | pending | pending |\n${structured}\n## UI / Visual Validation\n\n- pending\n\n## 风险与阻塞\n\n- pending\n`;
+  return `# 验证报告\n\n## 命令\n\n| 命令 | 结果 | 摘要 |\n| --- | --- | --- |\n| pending | pending | pending |\n${structured}\n## TDD 决策与证据\n\n- pending\n\n## 调试与 Review 处理\n\n- pending\n\n## 完成前验证\n\n- pending\n\n## UI / Visual Validation\n\n- pending\n\n## 风险与阻塞\n\n- pending\n`;
 }
 
 function validationContractJsonTemplate(_state, triggers = {}) {
@@ -1735,7 +1717,7 @@ function requirementAlignmentTemplate() {
 }
 
 function taskPlanTemplate() {
-  return `# Plan & Review Strategy\n\n## Execution Mode\n\n- mode: pending\n- worktree: false\n- subagents: false\n- checkpoint: false\n\n## Superpowers\n\n- pending: superpowers:writing-plans\n\n## RP DAG\n\n- RP1: pending\n\n## Review Strategy\n\n- 每个 RP 必须指向真实 diff、patch、branch 或 PR。\n\n## Validation Strategy\n\n- pending\n`;
+  return `# Plan & Review Strategy\n\n## Execution Mode\n\n- mode: pending\n- worktree: false\n- subagents: false\n- checkpoint: false\n\n## Task Granularity\n\n- 每个任务写清允许修改范围、实现步骤、测试命令和预期结果。\n\n## RP DAG\n\n- RP1: pending\n\n## Review Strategy\n\n- 每个 RP 必须指向真实 diff、patch、branch 或 PR。\n\n## Validation Strategy\n\n- pending\n`;
 }
 
 function progressTemplate() {
@@ -1818,7 +1800,6 @@ function printHelp() {
   node scripts/supermaestro.js source-revision <workbench> [--source-root <git-worktree>]
   node scripts/supermaestro.js approve-scope <workbench> --confirmed-by user --confirmation <text>
   node scripts/supermaestro.js approve-plan <workbench> --mode main-serial --confirmed-by user --confirmation <text> --worktree false --subagents false --checkpoint false
-  node scripts/supermaestro.js evidence <workbench> --type skill.used --skill superpowers:writing-plans --phase plan --summary <text>
   node scripts/supermaestro.js evidence <workbench> --type test.e2e --platform weapp --data-mode uat --command <command> --result passed --required 1 --executed 1 --passed 1 --failed 0 --case-ids E2E-1 --artifacts <paths> --report <path> --exit-code 0 --source-revision <revision>
   node scripts/supermaestro.js evidence <workbench> --type test.visual --platform weapp --data-mode fixture --purpose design-conformance --command <command> --result passed --required 1 --executed 1 --passed 1 --failed 0 --case-ids VIS-1 --artifacts <paths> --report <path> --baseline-manifest <path> --baseline-hash <sha256> --expected <path> --actual <path> --diff <path> --diff-ratio 0 --max-diff-ratio 0.05 --exit-code 0 --source-revision <revision>
   node scripts/supermaestro.js check <workbench> --action code --ui true --schema-extract specs/ui-schema-extract.md

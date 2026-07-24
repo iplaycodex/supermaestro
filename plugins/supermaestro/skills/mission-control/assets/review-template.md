@@ -41,7 +41,7 @@
 - Review Pack 是否完整：
 - Artifact 是否覆盖每个 RP 和 untracked 新文件：
 - Review Agent 是否已通过或明确不需要：
-- Review findings 是否已按 receiving-code-review 核实并处理：
+- Review findings 是否已核实并处理：
 - 验证记录是否可接受：
 - 是否有本轮新鲜验证证据：
 - 未执行检查是否已说明风险：
