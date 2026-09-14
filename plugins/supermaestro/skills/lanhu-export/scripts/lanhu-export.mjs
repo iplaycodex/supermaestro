@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { atomicExport, digest, loadResumeManifest, reusableArtifact, safeOutputPath } from './export-cache.mjs'
 
 const API_ORIGIN = 'https://lanhuapp.com'
 const API_BASE = `${API_ORIGIN}/api`
@@ -25,6 +26,8 @@ Options:
   --absolute-paths              Write absolute schema/image paths in manifest instead of relative paths.
   --include-all-if-group-empty  Allow whole-project export when group image lookup is empty.
   --allow-partial               Exit successfully even when one or more boards failed to export.
+  --resume                      Reuse verified artifacts for unchanged image/version IDs.
+  --concurrency <1-4>           Concurrent boards (default 1); progress is saved after each board.
   --help                        Show this message.
 `
 }
@@ -40,9 +43,10 @@ function parseArgs(argv) {
     'absolute-paths',
     'include-all-if-group-empty',
     'allow-partial',
+    'resume',
     'help'
   ])
-  const valueArgs = new Set(['url', 'group', 'out', 'cookie-file'])
+  const valueArgs = new Set(['url', 'group', 'out', 'cookie-file', 'concurrency'])
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (!arg.startsWith('--')) {
@@ -203,59 +207,52 @@ function makeHeaders(cookie, url) {
   return headers
 }
 
-async function fetchText(url, { cookie, method = 'GET', body } = {}) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30000)
-
-  try {
-    const safeUrl = redactUrl(url)
-    const res = await fetch(url, {
-      method,
-      headers: makeHeaders(cookie, url),
-      body,
-      redirect: 'manual',
-      signal: controller.signal
-    })
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location') || '(missing Location header)'
-      throw new Error(`Refusing redirect for ${safeUrl}: ${redactUrl(location, url)}`)
+// 只重试临时网络错误和明确的瞬时 HTTP 状态；鉴权、重定向和格式错误立即失败。
+async function fetchResource(url, { cookie, method = 'GET', body } = {}, binary = false) {
+  const safeUrl = redactUrl(url)
+  const headers = makeHeaders(cookie, url)
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000)
+    let retry = false
+    try {
+      const res = await fetch(url, { method, headers, body, redirect: 'manual', signal: controller.signal })
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('location') || '(missing Location header)'
+        const error = new Error(`Refusing redirect for ${safeUrl}: ${redactUrl(location, url)}`)
+        error.permanent = true
+        throw error
+      }
+      if (!res.ok) {
+        retry = [408, 429, 500, 502, 503, 504].includes(res.status)
+        const error = new Error(`HTTP ${res.status} for ${safeUrl}`)
+        error.permanent = !retry
+        await res.body?.cancel()
+        throw error
+      }
+      const contentType = res.headers.get('content-type') || ''
+      return binary
+        ? { buffer: Buffer.from(await res.arrayBuffer()), contentType }
+        : { text: await res.text(), contentType }
+    } catch (error) {
+      retry = retry || (!error.permanent && (error.name === 'AbortError' || error instanceof TypeError))
+      if (!retry || attempt === 2) {
+        if (error.permanent || /^HTTP /.test(error.message)) throw error
+        throw new Error(`Network request failed for ${safeUrl}; retry the export.`)
+      }
+    } finally {
+      clearTimeout(timeout)
     }
-    const text = await res.text()
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} for ${safeUrl}`)
-    }
-    return { text, contentType: res.headers.get('content-type') || '' }
-  } finally {
-    clearTimeout(timeout)
+    await new Promise(resolve => setTimeout(resolve, 250 * (2 ** attempt)))
   }
 }
 
-async function fetchBuffer(url, { cookie } = {}) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30000)
+async function fetchText(url, options = {}) {
+  return fetchResource(url, options)
+}
 
-  try {
-    const safeUrl = redactUrl(url)
-    const res = await fetch(url, {
-      headers: makeHeaders(cookie, url),
-      redirect: 'manual',
-      signal: controller.signal
-    })
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location') || '(missing Location header)'
-      throw new Error(`Refusing redirect for ${safeUrl}: ${redactUrl(location, url)}`)
-    }
-    const arrayBuffer = await res.arrayBuffer()
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} for ${safeUrl}`)
-    }
-    return {
-      buffer: Buffer.from(arrayBuffer),
-      contentType: res.headers.get('content-type') || ''
-    }
-  } finally {
-    clearTimeout(timeout)
-  }
+async function fetchBuffer(url, options = {}) {
+  return fetchResource(url, options, true)
 }
 
 async function fetchJson(url, options = {}) {
@@ -692,18 +689,18 @@ function extensionFromContentType(contentType, fallbackUrl) {
   return match ? `.${match[1].toLowerCase().replace('jpeg', 'jpg')}` : '.png'
 }
 
-async function downloadBinary(url, outputBase, cookie) {
+async function downloadBinary(url, outputBase, cookie, outDir) {
   const normalized = normalizeUrl(url)
   const { buffer, contentType } = await fetchBuffer(normalized, { cookie })
   const extension = extensionFromContentType(contentType, normalized)
   const outputPath = outputBase.endsWith(extension) ? outputBase : `${outputBase}${extension}`
-  await fs.writeFile(outputPath, buffer)
+  await atomicExport(outDir, path.relative(outDir, outputPath), buffer)
   return outputPath
 }
 
-async function downloadJson(url, outputPath, cookie) {
+async function downloadJson(url, outputPath, cookie, outDir) {
   const payload = await fetchJson(normalizeUrl(url), { cookie })
-  await fs.writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+  await atomicExport(outDir, path.relative(outDir, outputPath), `${JSON.stringify(payload, null, 2)}\n`)
   return outputPath
 }
 
@@ -745,6 +742,8 @@ async function main(argv = process.argv.slice(2)) {
     throw new Error('This script requires Node.js 18+ with global fetch.')
   }
 
+  const concurrency = args.concurrency === undefined ? 1 : Number(args.concurrency)
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('--concurrency must be an integer from 1 to 4.')
   const { tid, pid } = parseLanhuStageUrl(args.url)
   const cookie = await readCookie(args)
   const outDir = path.resolve(args.out)
@@ -809,8 +808,27 @@ async function main(argv = process.argv.slice(2)) {
     images: []
   }
 
-  for (let index = 0; index < dedupedRefs.length; index += 1) {
-    const ref = dedupedRefs[index]
+  const manifestPath = await safeOutputPath(outDir, 'manifest.json')
+  const previous = args.resume ? await loadResumeManifest(outDir, manifest.source) : null
+  const cached = new Map((previous?.images || []).filter(item => item?.image_id).map(item => [item.image_id, item]))
+  // 启动时保留尚未处理的旧记录，以便再次中断后仍可复用先前的成功下载。
+  manifest.images = dedupedRefs.map(ref => ({
+    ...(cached.get(ref.image_id) || {}),
+    image_id: ref.image_id,
+    name: ref.name || '',
+    status: 'pending',
+    errors: ['Board has not been processed in this export.']
+  }))
+  manifest.complete = false
+  let checkpoint = Promise.resolve()
+  const saveProgress = () => {
+    const content = `${JSON.stringify(manifest, null, 2)}\n`
+    checkpoint = checkpoint.then(() => atomicExport(outDir, 'manifest.json', content))
+    return checkpoint
+  }
+  await saveProgress()
+
+  async function exportBoard(ref, index) {
     const ordinal = String(index + 1).padStart(2, '0')
     const record = {
       image_id: ref.image_id,
@@ -821,59 +839,66 @@ async function main(argv = process.argv.slice(2)) {
       schema_path: '',
       errors: []
     }
-    if (withImages) {
-      record.image_path = ''
-    }
-
+    if (withImages) record.image_path = ''
     try {
       const detail = await fetchImageDetail({ cookie, tid, pid, imageId: ref.image_id })
       record.name = record.name || findFirstByKeys(detail, ['name', 'title', 'image_name', 'imageName'])
       record.version_id = extractVersionId(detail)
       record.versions = extractVersions(detail)
       const imageUrl = withImages ? extractImageUrl(detail) : ''
-
-      const baseName = `${ordinal}-${safeFilename(record.name, record.image_id)}`
+      const old = cached.get(ref.image_id)
+      const reusable = old?.version_id && old.version_id === record.version_id ? old : null
+      const identity = digest(JSON.stringify([ref.image_id, record.version_id])).slice(0, 16)
+      const baseName = `${ordinal}-${safeFilename(record.name, record.image_id)}-${identity}`
 
       if (!args['dry-run'] && !args['no-schema']) {
         if (!record.version_id) {
           record.errors.push('Missing version_id; schema download skipped.')
         } else {
-          const schemaInfo = await fetchSchemaInfo({ cookie, versionId: record.version_id })
-          const schemaUrl = schemaInfo.data_resource_url || schemaInfo.resource_url || schemaInfo.url || ''
-          if (!schemaUrl) {
-            record.errors.push('Missing data_resource_url from store_schema_revise.')
-          } else {
-            const schemaPath = await downloadJson(
-              schemaUrl,
-              path.join(schemasDir, `${baseName}.json`),
-              cookie
-            )
+          let schemaPath = await reusableArtifact(outDir, reusable, 'schema')
+          if (!schemaPath) {
+            const schemaInfo = await fetchSchemaInfo({ cookie, versionId: record.version_id })
+            const schemaUrl = schemaInfo.data_resource_url || schemaInfo.resource_url || schemaInfo.url || ''
+            if (!schemaUrl) record.errors.push('Missing data_resource_url from store_schema_revise.')
+            else schemaPath = await downloadJson(schemaUrl, path.join(schemasDir, `${baseName}.json`), cookie, outDir)
+          }
+          if (schemaPath) {
             record.schema_path = toManifestPath(schemaPath, outDir, Boolean(args['absolute-paths']))
+            record.schema_sha256 = digest(await fs.readFile(schemaPath))
           }
         }
       }
 
       if (!args['dry-run'] && withImages) {
-        if (!imageUrl) {
-          record.errors.push('Missing downloadable image URL; image download skipped.')
-        } else {
-          const imagePath = await downloadBinary(
-            imageUrl,
-            path.join(imagesDir, baseName),
-            cookie
-          )
+        let imagePath = await reusableArtifact(outDir, reusable, 'image')
+        if (!imagePath && !imageUrl) record.errors.push('Missing downloadable image URL; image download skipped.')
+        else if (!imagePath) imagePath = await downloadBinary(imageUrl, path.join(imagesDir, baseName), cookie, outDir)
+        if (imagePath) {
           record.image_path = toManifestPath(imagePath, outDir, Boolean(args['absolute-paths']))
+          record.image_sha256 = digest(await fs.readFile(imagePath))
         }
       }
     } catch (error) {
       record.errors.push(error.message)
     }
-
-    manifest.images.push(record)
+    record.status = record.errors.length ? 'failed' : 'completed'
+    manifest.images[index] = record
+    await saveProgress()
   }
 
-  const manifestPath = path.join(outDir, 'manifest.json')
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+  let cursor = 0
+  let progressError
+  const workers = Array.from({ length: Math.min(concurrency, dedupedRefs.length) }, async () => {
+    while (cursor < dedupedRefs.length && !progressError) {
+      const index = cursor++
+      try { await exportBoard(dedupedRefs[index], index) }
+      catch (error) { progressError = error }
+    }
+  })
+  await Promise.all(workers)
+  if (progressError) throw progressError
+  manifest.complete = manifest.images.every(item => item.status === 'completed')
+  await saveProgress()
 
   const failed = manifest.images.filter(item => item.errors.length)
   const summary = {

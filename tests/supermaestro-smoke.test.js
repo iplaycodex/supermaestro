@@ -60,6 +60,8 @@ function assertReadmeCommandsMatchCli() {
     'status',
     'next',
     'resume',
+    'reopen-gate',
+    'recover-workbench',
     'scaffold',
     'check-workbench',
     'check-contracts',

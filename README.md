@@ -231,6 +231,21 @@ check <workbench> --action cleanup --target <path>
 
 只有 registry 中仍存在、由本流程登记且当前路径/branch/base 与 Git 实际状态一致的 worktree 才能 `ALLOW`。随后仍由调用方单独执行 `git -C "<state.sourceRoot>" worktree remove <path>`；外部、未登记、已漂移或不存在的目标一律拒绝。
 
+## 变更后重新确认与异常恢复
+
+需求或计划变更后，`status --json true` 的 `gateValidity` 和 `resume` 会指出已过期的批准。重新打开最早受影响的门禁，再填写产物、检查并取得新的用户确认：
+
+```text
+node plugins/supermaestro/scripts/supermaestro.js reopen-gate documents/demo/workbench --gate scope --reason "需求增加了验收条件"
+node plugins/supermaestro/scripts/supermaestro.js recover-workbench documents/demo/workbench
+```
+
+`reopen-gate` 支持 scope/plan/review/final，撤销该门禁及下游批准；旧确认保存在 `approvalHistory`，已登记 worktree 保留。它不自动批准新范围。不要用 `init` 或手改状态刷新过期授权。
+
+`recover-workbench` 仅用于写入进程中断后的事务恢复。门禁转换写入失败会自动回退；中断事务会阻止后续动作。恢复拒绝接管活跃进程、越界路径或覆盖事务之后的外部修改。它只处理本次事务管理的工作台文件，不操作源码或 Git；已经提交的事务只清理遗留标记。
+
+详细操作见[命令与恢复指南](plugins/supermaestro/skills/mission-control/references/commands-and-recovery.md)。
+
 ## 按触发条件生成产物
 
 | 触发条件 | 主要产物 |
@@ -248,6 +263,8 @@ check <workbench> --action cleanup --target <path>
 产物按真实触发条件生成，不为了目录完整性创建空文档。E2E / visual 触发器一旦启用，不得通过后续 `scaffold --e2e false` 或 `--visual false` 移除既有验证义务。
 
 ## 验证证据
+
+`run-verification` 同时记录开始与结束的源码指纹。期间发生源码变化，即使命令退出码为 0 也记录失败并要求重跑；日志保留。执行期间保持目标源码稳定，生成源码的准备步骤应先完成，再运行验证。
 
 普通 test、build 或 lint 必须由无 shell 的内置 runner 真正执行，不能通过
 `evidence --type test.command` 手工自报成功：
@@ -292,6 +309,16 @@ worker 可在各自 target 运行局部验证，但结果只进入 handoff，不
 
 `fixture`、`mock-api`、`uat`、`real` 必须如实区分；Mock、静态检查或 HTTP 200 不能冒充真实业务链路。源码、contract 或证据产物变化后，旧 evidence 失效。详细字段见对应验证 Skill 的 `references/evidence-contract.md`。
 
+## 蓝湖断点续传
+
+```text
+node plugins/supermaestro/skills/lanhu-export/scripts/lanhu-export.mjs --url "<stage-url>" --group "<分组名>" --out "<导出目录>" --resume --concurrency 2
+```
+
+每完成一个画板都会原子保存 manifest；中断后使用同一项目、分组和输出目录续传。脚本仍查询最新画板版本，只复用 image_id/version_id 相同且本地 SHA-256 匹配的产物；失败、缺失、损坏和版本变化的产物重新下载。`--concurrency` 支持 1–4，默认 1，manifest 顺序保持稳定。临时网络错误和 408/429/500/502/503/504 最多尝试三次，鉴权与重定向错误不重试。
+
+新导出文件名增加画板/版本标识摘要，避免顺序或版本变化造成文件碰撞。旧 manifest 缺少哈希时安全重下，不推断旧文件完整；部分失败仍默认非零退出，`--allow-partial` 不改变失败事实。
+
 ## 安全边界
 
 - `state.json` 和 `events.jsonl` 是当前 CLI 的机器状态主源；legacy harness 只转发旧命令，不再维护第二套状态，新调用应直接使用根 CLI。
@@ -305,6 +332,10 @@ worker 可在各自 target 运行局部验证，但结果只进入 handoff，不
 - 视觉遮罩、跳过用例和阻塞证据都必须说明原因；只有用户明确接受剩余风险时才可放行。
 
 ## 开发与验证
+
+根 CLI 保留命令入口和编排；门禁生命周期、事务存储、worktree 登记、验证执行、契约产物校验分别位于 `gate-lifecycle.js`、`workbench-store.js`、`worktree-registry.js`、`verification-runner.js`、`artifact-validation.js`。均使用 Node 内置模块，无新增运行时依赖。
+
+工作台回退/重开及蓝湖进程中断续传回归已接入 `npm test`。蓝湖测试使用模拟接口，不能替代真实账号联调。
 
 先运行仓库内测试：
 

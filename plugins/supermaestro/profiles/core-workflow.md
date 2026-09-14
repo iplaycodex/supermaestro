@@ -110,6 +110,10 @@ workbench/reports/validation.md
 
 CLI 拒绝时立即停止；Prompt 或 Markdown 中的“已通过”不能覆盖 CLI 结果。
 
+材料变化导致批准过期时，使用 `reopen-gate --gate scope|plan|review|final --reason "<原因>"` 重新打开最早受影响门禁，再取得新的人工确认。旧批准进入 approvalHistory，下游授权失效，registry 保留。不要重新 init 或手改状态绕过漂移。
+
+批准转换使用工作台事务。写入失败自动回退；中断事务先执行 `recover-workbench`，再 status/resume。活跃 writer、日志损坏或事务之后的外部修改会阻止恢复，不能直接删除标记。
+
 ## 产物与契约
 
 `scaffold` 只按真实 trigger 生成产物：
@@ -131,6 +135,7 @@ E2E 和 visual trigger 一旦启用不得降级。Plan、Review 或 Final 后新
 普通测试、构建、lint、E2E 和视觉验证都必须绑定当前 Git working tree：
 
 - 记录实际命令、退出码、执行时间和数据模式；
+- `run-verification` 在执行前后核对源码指纹；期间源码变化时保留 failed 日志并重跑；
 - 由 CLI 计算 `sourceRevision`，不接受手工伪造 revision；
 - 报告与产物必须存在、非空并记录 SHA-256；
 - `verify` 现场重算源码指纹和产物 hash；

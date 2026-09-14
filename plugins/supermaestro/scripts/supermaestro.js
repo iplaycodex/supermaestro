@@ -18,6 +18,18 @@ const {
   resolveValidationSourceRoot
 } = require('./source-fingerprint');
 
+const {
+  atomicWriteText,
+  writeWorkbenchJson,
+  appendWorkbenchText,
+  resolveSafeWorkbenchWritePath,
+  ensureDir,
+  withWorkbenchSession,
+  recoverWorkbench,
+  assertWorkbenchReady,
+  beginTransaction
+} = require('./workbench-store');
+
 const WORKFLOW_VERSION = 3;
 const MIGRATABLE_WORKFLOW_VERSIONS = new Set([2]);
 const MISSION_ASSETS_DIR = path.resolve(__dirname, '../skills/mission-control/assets');
@@ -107,6 +119,8 @@ const COMMAND_OPTIONS = new Map([
   ['status', new Set(['json'])],
   ['next', new Set(['json'])],
   ['resume', new Set(['json'])],
+  ['reopen-gate', new Set(['gate', 'reason'])],
+  ['recover-workbench', new Set()],
   ['scaffold', new Set(['mode', ...SCAFFOLD_OPTIONS])],
   ['check-workbench', new Set()],
   ['check-contracts', new Set(['strict', 'phase', 'silent'])],
@@ -246,6 +260,89 @@ const DEFAULT_STATE = {
   }
 };
 
+const {
+  recommendNext,
+  requireGate,
+  hasGateHumanConfirmation,
+  inspectGateApprovals,
+  reopenGate
+} = require('./gate-lifecycle')({
+  normalizeMode,
+  DEFAULT_MODE,
+  GATE_ALIASES,
+  gateApprovalContext,
+  requireState,
+  saveState: saveGateState,
+  writeProjection,
+  appendEvent,
+  writeGateDecision,
+  DEFAULT_STATE
+});
+
+const {
+  normalizeWorktreeState,
+  worktreeStateKey,
+  requireWorktreeSourceRoot,
+  requirePathOption,
+  isPathInside,
+  normalizeWorktreeTarget,
+  normalizeWorktreeBranch,
+  resolveBaseCommit,
+  authorizeWorktreeIntent,
+  resolveGitCommonDir,
+  registerWorktree,
+  verifyRegisteredWorktreeForAction,
+  inspectRegisteredWorktree,
+  readWorktreeStatus,
+  createCleanupBinding,
+  assertCleanupBindingUnchanged
+} = require('./worktree-registry')({
+  normalizeProjectSourceRoot,
+  toKebab,
+  now,
+  saveState,
+  writeProjection,
+  appendEvent,
+  requireState,
+  requireGate
+});
+
+const {
+  runVerification
+} = require('./verification-runner')({
+  requireState,
+  requireCodingGate,
+  requireVerificationBinding,
+  resolveExecutionCwd,
+  resolveWritableWorkbenchRef,
+  splitList,
+  resolveSafeWorkbenchReadRef,
+  readPositiveInteger,
+  now,
+  atomicWriteText,
+  sha256File,
+  deepClone,
+  appendEvidence,
+  appendEvent
+});
+
+const {
+  collectContractIssues,
+  requireNonEmpty,
+  requireJsonAny,
+  validateApiContractContent,
+} = require('./artifact-validation')({
+  normalizeMode,
+  DEFAULT_MODE,
+  readBoolean,
+  hasUiManifest,
+  hasApiMaterial,
+  hasSchemaMapHeaders,
+  resolveWorkbenchRef,
+  hasNonEmptyFile,
+  hasReviewContractHeaders
+});
+
 main();
 
 function main() {
@@ -265,71 +362,90 @@ function main() {
     const options = parseArgs(args);
     validateCommandOptions(normalized, options);
 
-    switch (normalized) {
-      case 'init':
-        init(workbench, options);
-        break;
-      case 'status':
-        status(workbench, options);
-        break;
-      case 'next':
-        next(workbench, options);
-        break;
-      case 'resume':
-        resume(workbench, options);
-        break;
-      case 'scaffold':
-        scaffold(workbench, options);
-        break;
-      case 'check-workbench':
-        checkWorkbench(workbench);
-        break;
-      case 'check-contracts':
-        checkContractsCommand(workbench, options);
-        break;
-      case 'check-reviewability':
-        checkReviewability(workbench, options);
-        break;
-      case 'source-revision':
-        printSourceRevision(workbench, options);
-        break;
-      case 'run-verification':
-        runVerification(workbench, options);
-        break;
-      case 'register-worktree':
-        registerWorktree(workbench, options);
-        break;
-      case 'approve-scope':
-        approveScope(workbench, options);
-        break;
-      case 'approve-plan':
-        approvePlan(workbench, options);
-        break;
-      case 'check':
-        checkAction(workbench, options);
-        break;
-      case 'verify':
-        verify(workbench, options);
-        break;
-      case 'request-review':
-        requestReview(workbench, options);
-        break;
-      case 'approve-review':
-        approveReview(workbench, options);
-        break;
-      case 'request-final':
-        requestFinal(workbench, options);
-        break;
-      case 'approve-final':
-        approveFinal(workbench, options);
-        break;
-      case 'evidence':
-      case 'evidence-add':
-        addEvidenceCommand(workbench, options);
-        break;
-      default:
-        throw new Error(`Unknown command: ${command}`);
+    if (normalized === 'recover-workbench') {
+      recoverWorkbench(workbench);
+      return;
     }
+    if (normalized === 'status' || normalized === 'source-revision') {
+      assertWorkbenchReady(workbench);
+      if (normalized === 'status') status(workbench, options);
+      else printSourceRevision(workbench, options);
+      return;
+    }
+    if (normalized !== 'init' && !fs.existsSync(workbench)) {
+      throw new Error(`No state found. Run init first: ${workbench}`);
+    }
+    const transactional = ['init', 'scaffold', 'check', 'register-worktree', 'next', 'resume', 'evidence'].includes(normalized);
+    withWorkbenchSession(workbench, { transactional }, () => {
+      switch (normalized) {
+        case 'reopen-gate':
+          reopenGate(workbench, options);
+          break;
+        case 'init':
+          init(workbench, options);
+          break;
+        case 'status':
+          status(workbench, options);
+          break;
+        case 'next':
+          next(workbench, options);
+          break;
+        case 'resume':
+          resume(workbench, options);
+          break;
+        case 'scaffold':
+          scaffold(workbench, options);
+          break;
+        case 'check-workbench':
+          checkWorkbench(workbench);
+          break;
+        case 'check-contracts':
+          checkContractsCommand(workbench, options);
+          break;
+        case 'check-reviewability':
+          checkReviewability(workbench, options);
+          break;
+        case 'source-revision':
+          printSourceRevision(workbench, options);
+          break;
+        case 'run-verification':
+          runVerification(workbench, options);
+          break;
+        case 'register-worktree':
+          registerWorktree(workbench, options);
+          break;
+        case 'approve-scope':
+          approveScope(workbench, options);
+          break;
+        case 'approve-plan':
+          approvePlan(workbench, options);
+          break;
+        case 'check':
+          checkAction(workbench, options);
+          break;
+        case 'verify':
+          verify(workbench, options);
+          break;
+        case 'request-review':
+          requestReview(workbench, options);
+          break;
+        case 'approve-review':
+          approveReview(workbench, options);
+          break;
+        case 'request-final':
+          requestFinal(workbench, options);
+          break;
+        case 'approve-final':
+          approveFinal(workbench, options);
+          break;
+        case 'evidence':
+        case 'evidence-add':
+          addEvidenceCommand(workbench, options);
+          break;
+        default:
+          throw new Error(`Unknown command: ${command}`);
+      }
+    });
   } catch (error) {
     console.error(`supermaestro: ${error.message}`);
     process.exit(1);
@@ -527,6 +643,9 @@ function status(workbench, options = {}) {
   console.log(`Final: ${state.gates.gate4}`);
   console.log(`Execution: ${state.execution?.mode || '-'}`);
   console.log(`Workbench: ${workbench}`);
+  for (const gate of inspectGateApprovals(state).filter(item => !item.valid)) {
+    console.log(`Blocked: ${gate.reason}`);
+  }
 }
 
 function next(workbench, options = {}) {
@@ -908,228 +1027,10 @@ function checkContracts(workbench, options = {}) {
   return { failures, warnings, issues };
 }
 
-function collectContractIssues(workbench, state, options = {}) {
-  const mode = normalizeMode(state.mode || DEFAULT_MODE);
-  if (mode === 'lite' && !readBoolean(options.strict, false)) return [];
-
-  const triggers = state.artifacts?.triggers || {};
-  const strict = mode === 'strict' || readBoolean(options.strict, false);
-  const uiRequired = hasUiManifest(workbench) || triggers.ui === true;
-  const apiRequired = hasApiMaterial(workbench) || triggers.api === true;
-  const uiCodingRequired = triggers.uiCoding === true || (strict && uiRequired);
-  const behaviorRequired = triggers.behavior === true || strict;
-  const reviewRequired = triggers.review === true || mode === 'standard' || mode === 'strict';
-  const validationRequired = triggers.e2e === true || triggers.visual === true;
-  const issues = [];
-
-  if (uiRequired) {
-    const hasUiContract = requireNonEmpty(
-      issues,
-      workbench,
-      'specs/ui-contract.md',
-      'UI contract markdown is missing or empty.'
-    );
-    const uiContractRef = requireJsonAny(
-      issues,
-      workbench,
-      ['specs/machine/ui-contract.json', 'specs/ui-contract.json'],
-      'UI contract JSON is missing or invalid.'
-    );
-    const hasUiIndex = requireNonEmpty(
-      issues,
-      workbench,
-      'specs/ui-material-index.md',
-      'UI material index is missing or empty.'
-    );
-    if (hasUiContract && uiContractRef && hasUiIndex) {
-      validateUiContractContent(issues, workbench, uiContractRef);
-    }
-  }
-
-  if (uiCodingRequired) {
-    if (requireNonEmpty(issues, workbench, 'specs/ui-schema-extract.md', 'UI schema extract is missing or empty.')) {
-      const schemaExtract = fs.readFileSync(path.join(workbench, 'specs/ui-schema-extract.md'), 'utf8');
-      if (!hasSchemaMapHeaders(schemaExtract)) {
-        const legacyMap = resolveWorkbenchRef(workbench, 'specs/ui-schema-map.md');
-        const legacyOk = hasNonEmptyFile(legacyMap) && hasSchemaMapHeaders(fs.readFileSync(legacyMap, 'utf8'));
-        if (!legacyOk) {
-          issues.push({ level: 'FAIL', message: 'UI schema extract must include the standard Schema-to-implementation mapping table, or fallback specs/ui-schema-map.md must include it.' });
-        }
-      }
-    }
-  }
-
-  if (apiRequired) {
-    if (requireNonEmpty(issues, workbench, 'specs/api-contract.md', 'API contract markdown is missing or empty.')) {
-      validateApiContractContent(issues, workbench);
-    }
-    requireJsonAny(issues, workbench, ['specs/machine/api-contract.json', 'specs/api-contract.json'], 'API contract JSON is missing or invalid.');
-  }
-
-  if (apiRequired && uiRequired) {
-    requireNonEmpty(issues, workbench, 'specs/page-contract-matrix.md', 'Page contract matrix is missing or empty.');
-  }
-
-  if (behaviorRequired && requireNonEmpty(issues, workbench, 'specs/behavior-contract.md', 'Behavior contract is missing or empty.')) {
-    validateBehaviorContractContent(issues, workbench);
-  }
-
-  if (reviewRequired) {
-    validateReviewContract(issues, workbench);
-  }
-
-  if (validationRequired) {
-    validateValidationContractContent(issues, workbench, triggers, options);
-  }
-
-  return issues;
-}
-
-function validateValidationContractContent(issues, workbench, triggers, options = {}) {
-  const ref = 'specs/machine/validation-contract.json';
-  const file = resolveWorkbenchRef(workbench, ref);
-  if (!hasNonEmptyFile(file)) {
-    issues.push({ level: 'FAIL', message: 'Validation contract JSON is missing or empty.' });
-    return;
-  }
-  let contract;
-  try {
-    contract = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    issues.push({ level: 'FAIL', message: 'Validation contract JSON is invalid.' });
-    return;
-  }
-  const contractIssues = collectValidationContractIssues(contract, triggers)
-    .filter(message =>
-      options.phase !== 'plan' ||
-      !/sourceRevision is required/i.test(message)
-    );
-  for (const message of contractIssues) {
-    issues.push({ level: 'FAIL', message });
-  }
-}
-
-function requireNonEmpty(issues, workbench, ref, message) {
-  if (hasNonEmptyFile(resolveWorkbenchRef(workbench, ref))) return true;
-  issues.push({ level: 'FAIL', message });
-  return false;
-}
-
-function requireJson(issues, workbench, ref, message) {
-  const file = resolveWorkbenchRef(workbench, ref);
-  if (!hasNonEmptyFile(file)) {
-    issues.push({ level: 'FAIL', message });
-    return false;
-  }
-  try {
-    JSON.parse(fs.readFileSync(file, 'utf8'));
-    return true;
-  } catch {
-    issues.push({ level: 'FAIL', message });
-    return false;
-  }
-}
-
-function requireJsonAny(issues, workbench, refs, message) {
-  const existing = refs.find(ref => hasNonEmptyFile(resolveWorkbenchRef(workbench, ref)));
-  if (!existing) {
-    issues.push({ level: 'FAIL', message });
-    return '';
-  }
-  return requireJson(issues, workbench, existing, message) ? existing : '';
-}
-
-function validateUiContractContent(issues, workbench, jsonRef) {
-  const markdown = fs.readFileSync(
-    resolveWorkbenchRef(workbench, 'specs/ui-contract.md'),
-    'utf8'
-  );
-  const materialIndex = fs.readFileSync(
-    resolveWorkbenchRef(workbench, 'specs/ui-material-index.md'),
-    'utf8'
-  );
-  if (/(?:\bpending\b|TODO|待补|待确认)/i.test(markdown)) {
-    issues.push({
-      level: 'FAIL',
-      message: 'UI contract still contains unresolved template placeholders.'
-    });
-  }
-  if (/(?:\bpending\b|TODO|待补|待确认)/i.test(materialIndex)) {
-    issues.push({
-      level: 'FAIL',
-      message: 'UI material index still contains unresolved template placeholders.'
-    });
-  }
-  let contract;
-  try {
-    contract = JSON.parse(fs.readFileSync(resolveWorkbenchRef(workbench, jsonRef), 'utf8'));
-  } catch {
-    return;
-  }
-  if (!Array.isArray(contract.boards) || contract.boards.length === 0) {
-    issues.push({
-      level: 'FAIL',
-      message: 'UI contract JSON boards must contain at least one bound board.'
-    });
-  }
-}
-
-function validateApiContractContent(issues, workbench) {
-  const content = fs.readFileSync(path.join(workbench, 'specs/api-contract.md'), 'utf8');
-  const hasPlaceholder = /(pending|TODO|待补|待确认)/i.test(content);
-  const hasConclusion = /(blocked|partial|无接口变更|无 API|无接口|no api changes|no interface changes)/i.test(content);
-  const hasConcreteApi = /\b(GET|POST|PUT|DELETE|PATCH)\b|\/[a-z0-9_-]+|接口[:：]/i.test(content);
-  if (hasPlaceholder && !hasConclusion) {
-    issues.push({ level: 'FAIL', message: 'API contract still contains template placeholders without blocked/partial/no-change conclusion.' });
-  }
-  if (!hasConclusion && !hasConcreteApi) {
-    issues.push({ level: 'FAIL', message: 'API contract must contain concrete APIs, blocked/partial status, or explicit no API changes conclusion.' });
-  }
-}
-
-function validateBehaviorContractContent(issues, workbench) {
-  const content = fs.readFileSync(path.join(workbench, 'specs/behavior-contract.md'), 'utf8');
-  const hasPlaceholder = /(pending|TODO|待补|待确认)/i.test(content);
-  const hasRisk = /(open|blocking|blocked|阻塞|风险|pending)/i.test(content);
-  if (hasPlaceholder && !hasRisk) {
-    issues.push({ level: 'FAIL', message: 'Behavior contract still contains template placeholders.' });
-    return;
-  }
-  if (hasRisk) {
-    const projection = [
-      path.join(workbench, 'plans/progress.md'),
-      path.join(workbench, 'reports/validation.md')
-    ]
-      .filter(file => fs.existsSync(file))
-      .map(file => fs.readFileSync(file, 'utf8'))
-      .join('\n\n');
-    if (/(open|blocking|blocked|阻塞|风险)/i.test(content) && !/(behavior|行为|状态机|权限|缓存|并发|阻塞|风险)/i.test(projection)) {
-      issues.push({ level: 'FAIL', message: 'Behavior contract risks must be mirrored in plans/progress.md or reports/validation.md.' });
-    }
-  }
-}
-
-function validateReviewContract(issues, workbench) {
-  const reviewPacks = resolveWorkbenchRef(workbench, 'reviews/review-packs.md');
-  const legacyReviewContract = resolveWorkbenchRef(workbench, 'specs/review-contract.md');
-  const candidate = hasNonEmptyFile(reviewPacks) && hasReviewContractHeaders(fs.readFileSync(reviewPacks, 'utf8'))
-    ? reviewPacks
-    : hasNonEmptyFile(legacyReviewContract)
-      ? legacyReviewContract
-      : '';
-  if (!candidate) {
-    issues.push({ level: 'FAIL', message: 'Review contract or review packs are missing.' });
-    return;
-  }
-  const content = fs.readFileSync(candidate, 'utf8');
-  if (!/(git diff|diff command|patch|branch|PR|pull request|pending|待实现|待绑定)/i.test(content)) {
-    issues.push({ level: 'FAIL', message: 'Review contract must point to diff/patch/branch/PR or explicitly mark pending state.' });
-  }
-}
-
 function approveScope(workbench, options) {
   const state = requireState(workbench);
   if (state.gates.gate1 === 'approved') {
+    requireGate(state, 'gate1');
     console.log('Scope gate is already approved.');
     return;
   }
@@ -1151,7 +1052,7 @@ function approveScope(workbench, options) {
   }
   recordHumanConfirmation(nextState, 'gate1', options);
   nextState.updatedAt = now();
-  saveState(workbench, nextState);
+  saveGateState(workbench, nextState);
   writeGateDecision(workbench, 1, nextState, options, 'scope');
   writeProjection(workbench, nextState);
   appendEvent(workbench, 'gate.approved', { gate: 'scope', confirmedBy: 'user' });
@@ -1166,6 +1067,7 @@ function approvePlan(workbench, options) {
   }
   requireGate(state, 'gate1');
   if (state.gates.gate2 === 'approved') {
+    requireGate(state, 'gate2');
     console.log('Plan gate is already approved.');
     return;
   }
@@ -1260,7 +1162,7 @@ function approvePlan(workbench, options) {
   };
   recordHumanConfirmation(nextState, 'gate2', options);
   nextState.updatedAt = now();
-  saveState(workbench, nextState);
+  saveGateState(workbench, nextState);
   writeGateDecision(workbench, 2, nextState, options, 'plan');
   writeProjection(workbench, nextState);
   appendEvent(workbench, 'gate.approved', { gate: 'plan', execution: nextState.execution });
@@ -1412,493 +1314,6 @@ function checkAction(workbench, options) {
   }
 
   throw new Error(`Unknown action: ${action}`);
-}
-
-function normalizeWorktreeState(value) {
-  const worktrees = value && typeof value === 'object' ? value : {};
-  return {
-    intents: worktrees.intents && typeof worktrees.intents === 'object'
-      ? worktrees.intents
-      : {},
-    registry: worktrees.registry && typeof worktrees.registry === 'object'
-      ? worktrees.registry
-      : {}
-  };
-}
-
-function worktreeStateKey(target) {
-  return crypto.createHash('sha256').update(target).digest('hex');
-}
-
-function requireWorktreeSourceRoot(state) {
-  if (!state.sourceRoot) {
-    throw new Error('Worktree actions require state.sourceRoot.');
-  }
-  return normalizeProjectSourceRoot(state.sourceRoot);
-}
-
-function requirePathOption(options, name, label = name) {
-  const value = String(options[name] || '').trim();
-  if (!value) throw new Error(`Missing --${toKebab(name)} for ${label}.`);
-  if (/[\0\r\n]/.test(value)) {
-    throw new Error(`--${toKebab(name)} contains an invalid control character.`);
-  }
-  return value;
-}
-
-function isPathInside(root, target) {
-  const relative = path.relative(root, target);
-  return relative === '' ||
-    (
-      relative !== '..' &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative)
-    );
-}
-
-function canonicalPotentialPath(value) {
-  const resolved = path.resolve(value);
-  let cursor = resolved;
-  const suffix = [];
-  while (!fs.existsSync(cursor)) {
-    const parent = path.dirname(cursor);
-    if (parent === cursor) {
-      throw new Error(`Cannot resolve an existing ancestor for path: ${value}`);
-    }
-    suffix.unshift(path.basename(cursor));
-    cursor = parent;
-  }
-  if (!fs.statSync(cursor).isDirectory()) {
-    throw new Error(`Path ancestor is not a directory: ${cursor}`);
-  }
-  return path.resolve(fs.realpathSync(cursor), ...suffix);
-}
-
-function systemTemporaryRoots() {
-  const candidates = [
-    os.tmpdir(),
-    process.env.TMPDIR,
-    process.env.TEMP,
-    process.env.TMP,
-    ...(process.platform === 'win32' ? [] : ['/tmp', '/private/tmp', '/var/tmp'])
-  ].filter(Boolean);
-  return Array.from(new Set(candidates.map(candidate => {
-    const resolved = path.resolve(candidate);
-    return fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
-  })));
-}
-
-function normalizeWorktreeTarget(options, sourceRoot, { mustExist = false } = {}) {
-  const value = requirePathOption(options, 'target', 'worktree action');
-  const requestedTarget = path.isAbsolute(value)
-    ? value
-    : path.resolve(sourceRoot, value);
-  const target = canonicalPotentialPath(requestedTarget);
-  const canonicalSourceRoot = fs.realpathSync(sourceRoot);
-  if (isPathInside(canonicalSourceRoot, target)) {
-    throw new Error('--target must not equal or be inside sourceRoot.');
-  }
-  const temporaryRoot = systemTemporaryRoots().find(root => isPathInside(root, target));
-  if (temporaryRoot) {
-    throw new Error(`--target must not be inside a system temporary directory: ${temporaryRoot}`);
-  }
-  if (mustExist) {
-    if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
-      throw new Error(`Registered worktree target does not exist: ${target}`);
-    }
-    return fs.realpathSync(target);
-  }
-  if (fs.existsSync(target) && !fs.statSync(target).isDirectory()) {
-    throw new Error(`Worktree target exists but is not a directory: ${target}`);
-  }
-  return target;
-}
-
-function normalizeWorktreeBranch(sourceRoot, value) {
-  const branch = String(value || '').trim();
-  if (!branch) throw new Error('Missing --branch for worktree action.');
-  if (
-    branch.startsWith('-') ||
-    branch.startsWith('refs/') ||
-    branch.includes('@{') ||
-    /[\0\r\n]/.test(branch)
-  ) {
-    throw new Error(`Invalid worktree branch: ${branch}`);
-  }
-  const result = spawnSync(
-    'git',
-    ['-C', sourceRoot, 'check-ref-format', '--branch', branch],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
-  );
-  const normalized = String(result.stdout || '').trim();
-  if (result.status !== 0 || normalized !== branch) {
-    throw new Error(`Invalid worktree branch: ${branch}`);
-  }
-  return branch;
-}
-
-function resolveBaseCommit(sourceRoot, value) {
-  const base = String(value || '').trim();
-  if (!base) throw new Error('Missing --base for worktree action.');
-  if (base.startsWith('-') || /[\0\r\n]/.test(base)) {
-    throw new Error(`Invalid worktree base: ${base}`);
-  }
-  const result = spawnSync(
-    'git',
-    ['-C', sourceRoot, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
-  );
-  const commit = String(result.stdout || '').trim();
-  if (result.status !== 0 || !/^[0-9a-f]{40,64}$/i.test(commit)) {
-    throw new Error(`Worktree base does not resolve to a commit: ${base}`);
-  }
-  return commit.toLowerCase();
-}
-
-function authorizeWorktreeIntent(workbench, state, action, options) {
-  const sourceRoot = requireWorktreeSourceRoot(state);
-  const target = normalizeWorktreeTarget(options, sourceRoot);
-  const branch = normalizeWorktreeBranch(
-    sourceRoot,
-    requirePathOption(options, 'branch', action)
-  );
-  const base = requirePathOption(options, 'base', action);
-  const baseCommit = resolveBaseCommit(sourceRoot, base);
-  const contractEntries = state.execution?.worktreeContract?.entries;
-  if (!Array.isArray(contractEntries) || contractEntries.length === 0) {
-    throw new Error(
-      'Gate 2 is missing a machine-bound worktree contract. Repeat Plan approval.'
-    );
-  }
-  const contractEntry = contractEntries.find(entry =>
-    entry.target === target &&
-    entry.branch === branch &&
-    entry.base === base &&
-    entry.baseCommit === baseCommit
-  );
-  if (!contractEntry) {
-    throw new Error(
-      `Worktree intent ${target} / ${branch} / ${base} was not approved by Gate 2.`
-    );
-  }
-  if (fs.existsSync(target)) {
-    throw new Error(
-      `Worktree target must not exist before authorization: ${target}`
-    );
-  }
-  const alreadyListed = parseGitWorktreeList(sourceRoot).some(entry => {
-    return entry.worktree &&
-      canonicalPotentialPath(entry.worktree) === target;
-  });
-  if (alreadyListed) {
-    throw new Error(
-      `Worktree target is already present in git worktree list: ${target}`
-    );
-  }
-  const gitCommonDir = resolveGitCommonDir(sourceRoot);
-  const key = worktreeStateKey(target);
-  state.worktrees = normalizeWorktreeState(state.worktrees);
-  const existingIntent = state.worktrees.intents[key];
-  const existingRegistration = state.worktrees.registry[key];
-
-  for (const existing of [existingIntent, existingRegistration].filter(Boolean)) {
-    if (
-      existing.target !== target ||
-      existing.branch !== branch ||
-      existing.base !== base ||
-      existing.baseCommit !== baseCommit ||
-      existing.gitCommonDir !== gitCommonDir
-    ) {
-      throw new Error(
-        `Worktree target is already bound to ${existing.branch}@${existing.base} (${existing.baseCommit}).`
-      );
-    }
-  }
-
-  const authorizedActions = Array.from(new Set([
-    ...(existingIntent?.authorizedActions || []),
-    action
-  ])).sort();
-  state.worktrees.intents[key] = {
-    target,
-    branch,
-    base,
-    baseCommit,
-    gitCommonDir,
-    intentNonce: existingIntent?.intentNonce || crypto.randomUUID(),
-    authorizedActions,
-    authorizedAt: existingIntent?.authorizedAt || now(),
-    updatedAt: now()
-  };
-  state.updatedAt = now();
-  saveState(workbench, state);
-  writeProjection(workbench, state);
-  appendEvent(workbench, 'worktree.intent-authorized', {
-    action,
-    target,
-    branch,
-    base,
-    baseCommit
-  });
-}
-
-function parseGitWorktreeList(sourceRoot) {
-  const result = spawnSync(
-    'git',
-    ['-C', sourceRoot, 'worktree', 'list', '--porcelain', '-z'],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024 }
-  );
-  if (result.status !== 0) {
-    const detail = String(result.stderr || '').trim();
-    throw new Error(`Unable to inspect Git worktrees${detail ? `: ${detail}` : '.'}`);
-  }
-
-  const entries = [];
-  let current = {};
-  for (const field of String(result.stdout || '').split('\0')) {
-    if (!field) {
-      if (current.worktree) entries.push(current);
-      current = {};
-      continue;
-    }
-    const separator = field.indexOf(' ');
-    const key = separator === -1 ? field : field.slice(0, separator);
-    const value = separator === -1 ? true : field.slice(separator + 1);
-    current[key] = value;
-  }
-  if (current.worktree) entries.push(current);
-  return entries;
-}
-
-function resolveGitCommonDir(repoRoot) {
-  const result = spawnSync(
-    'git',
-    ['-C', repoRoot, 'rev-parse', '--git-common-dir'],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
-  );
-  const raw = String(result.stdout || '').trim();
-  if (result.status !== 0 || !raw) {
-    const detail = String(result.stderr || '').trim();
-    throw new Error(`Unable to resolve Git common dir${detail ? `: ${detail}` : '.'}`);
-  }
-  const resolved = path.isAbsolute(raw) ? raw : path.resolve(repoRoot, raw);
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Git common dir does not exist: ${resolved}`);
-  }
-  return fs.realpathSync(resolved);
-}
-
-function findLiveWorktree(sourceRoot, target) {
-  const matches = parseGitWorktreeList(sourceRoot).filter(entry => {
-    if (!entry.worktree || !fs.existsSync(entry.worktree)) return false;
-    return fs.realpathSync(entry.worktree) === target;
-  });
-  if (matches.length !== 1) {
-    throw new Error(
-      `Expected exactly one live Git worktree for ${target}; found ${matches.length}.`
-    );
-  }
-  return matches[0];
-}
-
-function assertLiveWorktreeMatches(entry, live, { requireInitialHead = false } = {}) {
-  const expectedBranch = `refs/heads/${entry.branch}`;
-  if (live.branch !== expectedBranch) {
-    throw new Error(
-      `Live worktree branch mismatch for ${entry.target}: expected ${expectedBranch}, got ${live.branch || '(detached)'}.`
-    );
-  }
-  const head = String(live.HEAD || '').toLowerCase();
-  if (!/^[0-9a-f]{40,64}$/.test(head)) {
-    throw new Error(`Live worktree HEAD is invalid for ${entry.target}.`);
-  }
-  if (requireInitialHead && head !== entry.baseCommit) {
-    throw new Error(
-      `Live worktree HEAD mismatch for ${entry.target}: expected base commit ${entry.baseCommit}, got ${head}.`
-    );
-  }
-  return head;
-}
-
-function registerWorktree(workbench, options) {
-  const state = requireState(workbench);
-  requireGate(state, 'gate2');
-  if (state.execution?.worktree !== true) {
-    throw new Error('Gate 2 execution mode did not authorize worktrees.');
-  }
-
-  const sourceRoot = requireWorktreeSourceRoot(state);
-  const target = normalizeWorktreeTarget(options, sourceRoot, { mustExist: true });
-  const branch = normalizeWorktreeBranch(
-    sourceRoot,
-    requirePathOption(options, 'branch', 'register-worktree')
-  );
-  const base = requirePathOption(options, 'base', 'register-worktree');
-  const baseCommit = resolveBaseCommit(sourceRoot, base);
-  const key = worktreeStateKey(target);
-  state.worktrees = normalizeWorktreeState(state.worktrees);
-  const intent = state.worktrees.intents[key];
-  if (
-    !intent ||
-    intent.target !== target ||
-    intent.branch !== branch ||
-    intent.base !== base ||
-    intent.baseCommit !== baseCommit
-  ) {
-    throw new Error(
-      'register-worktree requires target, branch, base, and baseCommit to match the authorized intent.'
-    );
-  }
-
-  const live = findLiveWorktree(sourceRoot, target);
-  const head = assertLiveWorktreeMatches(intent, live, { requireInitialHead: true });
-  const gitCommonDir = resolveGitCommonDir(target);
-  if (gitCommonDir !== intent.gitCommonDir) {
-    throw new Error(
-      `Live worktree Git common dir mismatch: expected ${intent.gitCommonDir}, got ${gitCommonDir}.`
-    );
-  }
-  const existing = state.worktrees.registry[key];
-  if (
-    existing &&
-    (
-      existing.target !== intent.target ||
-      existing.branch !== intent.branch ||
-      existing.base !== intent.base ||
-      existing.baseCommit !== intent.baseCommit ||
-      existing.gitCommonDir !== intent.gitCommonDir ||
-      existing.intentNonce !== intent.intentNonce
-    )
-  ) {
-    throw new Error('Existing worktree registry entry does not match the authorized intent.');
-  }
-
-  state.worktrees.registry[key] = {
-    target: intent.target,
-    branch: intent.branch,
-    base: intent.base,
-    baseCommit: intent.baseCommit,
-    gitCommonDir,
-    intentNonce: intent.intentNonce,
-    head,
-    createdByWorkflow: true,
-    authorizedActions: [...intent.authorizedActions],
-    registeredAt: existing?.registeredAt || now(),
-    lastVerifiedAt: now(),
-    lastVerifiedHead: head
-  };
-  state.updatedAt = now();
-  saveState(workbench, state);
-  writeProjection(workbench, state);
-  appendEvent(workbench, 'worktree.registered', {
-    target,
-    branch,
-    head,
-    createdByWorkflow: true
-  });
-  console.log(`Registered worktree: ${target}`);
-  console.log(`Branch: ${branch}`);
-  console.log(`HEAD: ${head}`);
-}
-
-function verifyRegisteredWorktreeForAction(workbench, state, options, action) {
-  const verified = inspectRegisteredWorktree(state, options, action);
-  verified.entry.lastVerifiedAt = now();
-  verified.entry.lastVerifiedHead = verified.head;
-  state.updatedAt = now();
-  saveState(workbench, state);
-  writeProjection(workbench, state);
-  appendEvent(workbench, 'worktree.verified', {
-    action,
-    target: verified.entry.target,
-    branch: verified.entry.branch,
-    head: verified.head
-  });
-  return verified;
-}
-
-function inspectRegisteredWorktree(state, options, action) {
-  const sourceRoot = requireWorktreeSourceRoot(state);
-  const target = normalizeWorktreeTarget(options, sourceRoot, { mustExist: true });
-  const key = worktreeStateKey(target);
-  state.worktrees = normalizeWorktreeState(state.worktrees);
-  const entry = state.worktrees.registry[key];
-  if (!entry || entry.target !== target || entry.createdByWorkflow !== true) {
-    throw new Error(
-      `${action} requires --target to identify a worktree registered by this workflow.`
-    );
-  }
-  const live = findLiveWorktree(sourceRoot, target);
-  const head = assertLiveWorktreeMatches(entry, live);
-  const gitCommonDir = resolveGitCommonDir(target);
-  if (gitCommonDir !== entry.gitCommonDir) {
-    throw new Error(
-      `Registered worktree Git common dir changed: expected ${entry.gitCommonDir}, got ${gitCommonDir}.`
-    );
-  }
-  return { entry, live, head, gitCommonDir };
-}
-
-function readWorktreeStatus(target) {
-  const result = spawnSync(
-    'git',
-    ['-C', target, 'status', '--porcelain=v1', '--untracked-files=all'],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 }
-  );
-  if (result.status !== 0) {
-    const detail = String(result.stderr || '').trim();
-    throw new Error(`Unable to inspect worktree cleanliness${detail ? `: ${detail}` : '.'}`);
-  }
-  return String(result.stdout || '');
-}
-
-function createCleanupBinding(verified) {
-  const status = readWorktreeStatus(verified.entry.target);
-  if (status.trim()) {
-    throw new Error(
-      `Final cleanup authorization requires a clean worktree: ${verified.entry.target}`
-    );
-  }
-  return {
-    target: verified.entry.target,
-    branch: verified.entry.branch,
-    head: verified.head,
-    registryKey: worktreeStateKey(verified.entry.target),
-    intentNonce: verified.entry.intentNonce,
-    gitCommonDir: verified.gitCommonDir,
-    workingTreeFingerprint: fingerprintGitWorkingTree(verified.entry.target),
-    clean: true,
-    authorizedAt: now()
-  };
-}
-
-function assertCleanupBindingUnchanged(binding, verified) {
-  if (!binding || typeof binding !== 'object') {
-    throw new Error('Final gate cleanup authorization is missing its bound worktree identity.');
-  }
-  if (
-    binding.target !== verified.entry.target ||
-    binding.branch !== verified.entry.branch ||
-    binding.registryKey !== worktreeStateKey(verified.entry.target) ||
-    binding.intentNonce !== verified.entry.intentNonce ||
-    binding.gitCommonDir !== verified.gitCommonDir
-  ) {
-    throw new Error(
-      `Final gate cleanup authorization is bound to ${binding.target || '(none)'}, not ${verified.entry.target}.`
-    );
-  }
-  if (binding.head !== verified.head) {
-    throw new Error(
-      `Cleanup authorization HEAD changed: expected ${binding.head}, got ${verified.head}.`
-    );
-  }
-  if (readWorktreeStatus(verified.entry.target).trim()) {
-    throw new Error('Cleanup authorization is stale because the worktree is no longer clean.');
-  }
-  const fingerprint = fingerprintGitWorkingTree(verified.entry.target);
-  if (binding.workingTreeFingerprint !== fingerprint) {
-    throw new Error('Cleanup authorization is stale because the worktree fingerprint changed.');
-  }
 }
 
 function readGitHeadIdentity(target) {
@@ -2475,7 +1890,7 @@ function requestReview(workbench, options) {
     delete nextState.humanConfirmations.gate4;
   }
   nextState.updatedAt = now();
-  saveState(workbench, nextState);
+  saveGateState(workbench, nextState);
   writeGateDecision(workbench, 3, nextState, options, 'review');
   writeProjection(workbench, nextState);
   appendEvent(workbench, 'gate.requested', { gate: 'review' });
@@ -2515,7 +1930,7 @@ function approveReview(workbench, options) {
   }
   recordHumanConfirmation(state, 'gate3', options);
   state.updatedAt = now();
-  saveState(workbench, state);
+  saveGateState(workbench, state);
   writeGateDecision(workbench, 3, state, options, 'review');
   writeProjection(workbench, state);
   appendEvent(workbench, 'gate.approved', { gate: 'review' });
@@ -2541,7 +1956,7 @@ function requestFinal(workbench, options) {
     delete state.humanConfirmations.gate4;
   }
   state.updatedAt = now();
-  saveState(workbench, state);
+  saveGateState(workbench, state);
   writeGateDecision(workbench, 4, state, options, 'final');
   writeProjection(workbench, state);
   appendEvent(workbench, 'gate.requested', { gate: 'final' });
@@ -2607,7 +2022,7 @@ function approveFinal(workbench, options) {
   state.finalActionChecks = {};
   recordHumanConfirmation(state, 'gate4', options);
   state.updatedAt = now();
-  saveState(workbench, state);
+  saveGateState(workbench, state);
   writeGateDecision(workbench, 4, state, options, 'final');
   writeProjection(workbench, state);
   appendEvent(workbench, 'gate.approved', {
@@ -2845,114 +2260,6 @@ function printSourceRevision(workbench, options) {
   console.log(fingerprintGitWorkingTree(binding.sourceRoot, {
     excludePaths: [workbench]
   }));
-}
-
-function runVerification(workbench, options) {
-  const state = requireState(workbench);
-  requireCodingGate(state);
-  const program = String(options.program || '').trim();
-  if (!program) throw new Error('run-verification requires --program.');
-
-  let args;
-  try {
-    args = options.argsJson === undefined ? [] : JSON.parse(String(options.argsJson));
-  } catch {
-    throw new Error('run-verification --args-json must be a JSON array of strings.');
-  }
-  if (!Array.isArray(args) || args.some(value => typeof value !== 'string')) {
-    throw new Error('run-verification --args-json must be a JSON array of strings.');
-  }
-
-  const binding = requireVerificationBinding(
-    workbench,
-    state,
-    options,
-    { requireExplicitWorktreeTarget: true }
-  );
-  const sourceRoot = binding.sourceRoot;
-  const executionCwd = resolveExecutionCwd(sourceRoot, options.cwd);
-  const report = String(options.report || '').trim();
-  const reportFile = resolveWritableWorkbenchRef(workbench, report);
-  const artifacts = Array.from(new Set([...splitList(options.artifacts), report]));
-  for (const ref of artifacts) {
-    resolveSafeWorkbenchReadRef(workbench, ref, {
-      label: 'run-verification artifact'
-    });
-  }
-  const timeoutMs = options.timeoutMs === undefined
-    ? 10 * 60 * 1000
-    : readPositiveInteger(options.timeoutMs, 'timeout-ms');
-  const startedAt = now();
-  const result = spawnSync(program, args, {
-    cwd: executionCwd,
-    encoding: 'utf8',
-    shell: false,
-    timeout: timeoutMs,
-    maxBuffer: 64 * 1024 * 1024
-  });
-  const exitCode = Number.isInteger(result.status) ? result.status : 1;
-  const command = JSON.stringify([program, ...args]);
-  const reportContent = [
-    `startedAt: ${startedAt}`,
-    `finishedAt: ${now()}`,
-    `cwd: ${executionCwd}`,
-    `command: ${command}`,
-    `exitCode: ${exitCode}`,
-    result.error ? `error: ${result.error.message}` : '',
-    '',
-    '--- stdout ---',
-    String(result.stdout || ''),
-    '',
-    '--- stderr ---',
-    String(result.stderr || '')
-  ].filter((line, index, lines) => line !== '' || lines[index - 1] !== '').join('\n');
-  atomicWriteText(reportFile, `${reportContent.trimEnd()}\n`);
-
-  const sourceRevision = fingerprintGitWorkingTree(sourceRoot, { excludePaths: [workbench] });
-  const artifactHashes = {};
-  for (const ref of artifacts) {
-    const file = resolveSafeWorkbenchReadRef(workbench, ref, {
-      label: 'run-verification artifact',
-      mustExist: true,
-      requireNonEmpty: true
-    });
-    artifactHashes[ref] = sha256File(file);
-  }
-  const entry = {
-    type: 'test.command',
-    at: now(),
-    phase: String(options.phase || '').trim(),
-    command,
-    program,
-    args,
-    cwd: executionCwd,
-    result: exitCode === 0 && !result.error ? 'passed' : 'failed',
-    exitCode,
-    sourceRoot,
-    sourceRevision,
-    verificationTarget: deepClone(binding.identity),
-    verificationTargetHash: binding.identityHash,
-    fanIn: deepClone(binding.fanIn),
-    fanInHash: binding.fanInHash,
-    report,
-    artifacts,
-    artifactHashes,
-    executedBy: 'supermaestro-runner',
-    source: 'supermaestro-runner'
-  };
-  appendEvidence(workbench, entry);
-  appendEvent(workbench, 'verification.executed', {
-    result: entry.result,
-    exitCode,
-    command,
-    sourceRevision,
-    verificationTargetHash: binding.identityHash,
-    report
-  });
-  if (entry.result !== 'passed') {
-    throw new Error(`Verification command failed with exit code ${exitCode}. See ${report}.`);
-  }
-  console.log(`Verification command passed. Evidence: ${report}`);
 }
 
 function requireCodingGate(state) {
@@ -3742,59 +3049,6 @@ function appendEvidence(workbench, entry) {
   appendWorkbenchText(workbench, 'reports/evidence.jsonl', `${JSON.stringify(entry)}\n`);
 }
 
-function recommendNext(state) {
-  const mode = normalizeMode(state.mode || DEFAULT_MODE);
-  if (state.gates.gate1 !== 'approved') {
-    return mode === 'lite'
-      ? 'Next: complete brief.md, run check-workbench, then approve-scope.'
-      : 'Next: complete scope/contract alignment, run check-workbench, then approve-scope.';
-  }
-  if (mode === 'lite') {
-    if (state.gates.gate4 !== 'approved') return 'Next: implement the small change, record validation/evidence, then request-final/approve-final.';
-    return 'Next: final actions may run only after explicit checks.';
-  }
-  if (state.gates.gate2 !== 'approved') {
-    return 'Next: complete task plan, review strategy, validation skeleton and approve-plan.';
-  }
-  if (state.gates.gate3 !== 'approved') {
-    return 'Next: execute approved tasks, fan-in review packs and validation, then run verify/request-review.';
-  }
-  if (state.gates.gate4 !== 'approved') {
-    return 'Next: human reviews Gate Review artifacts, then request/approve Final gate.';
-  }
-  return 'Next: final actions may run only after explicit checks.';
-}
-
-function requireGate(state, gate) {
-  if (state.gates[gate] !== 'approved') {
-    throw new Error(`${GATE_ALIASES[gate] || gate} gate is not approved.`);
-  }
-  if (!hasGateHumanConfirmation(state, gate)) {
-    throw new Error(
-      `${GATE_ALIASES[gate]} gate is approved but missing explicit user confirmation. Re-run approval with --confirmed-by user --confirmation "<用户确认原话或摘要>".`
-    );
-  }
-  const confirmation = state.humanConfirmations[gate];
-  const currentContext = gateApprovalContext(state, gate);
-  if (
-    !confirmation.approvalContext ||
-    JSON.stringify(confirmation.approvalContext) !== JSON.stringify(currentContext)
-  ) {
-    throw new Error(
-      `${GATE_ALIASES[gate]} gate approval no longer matches current workflow state. Reinitialize or repeat the gate workflow with explicit user confirmation.`
-    );
-  }
-}
-
-function hasGateHumanConfirmation(state, gate) {
-  const confirmation = state.humanConfirmations && state.humanConfirmations[gate];
-  return (
-    confirmation &&
-    confirmation.confirmedBy === 'user' &&
-    String(confirmation.confirmationText || '').trim().length >= 6
-  );
-}
-
 function gateApprovalContext(state, gate) {
   const context = {
     mode: normalizeMode(state.mode || DEFAULT_MODE)
@@ -4122,6 +3376,8 @@ function projectState(state, workbench) {
     worktrees: normalizeWorktreeState(state.worktrees),
     verificationSnapshot: state.verificationSnapshot || null,
     humanConfirmations: state.humanConfirmations || {},
+    approvalHistory: state.approvalHistory || [],
+    gateValidity: inspectGateApprovals(state),
     checks: state.checks,
     recommendedNext: recommendNext(state),
     workbench,
@@ -4149,6 +3405,7 @@ function loadState(workbench, fallback) {
 }
 
 function requireState(workbench) {
+  assertWorkbenchReady(workbench);
   const state = loadState(workbench, null);
   if (!state) throw new Error(`No state found. Run init first: ${workbench}`);
   if (state.workflowVersion !== WORKFLOW_VERSION) {
@@ -4176,6 +3433,11 @@ function requireState(workbench) {
   delete state.checks.policy;
   delete state.checks.policyMissing;
   return state;
+}
+
+function saveGateState(workbench, state) {
+  beginTransaction();
+  saveState(workbench, state);
 }
 
 function saveState(workbench, state) {
@@ -4720,86 +3982,6 @@ function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-function atomicWriteText(file, content) {
-  ensureDir(path.dirname(file));
-  const temp = path.join(
-    path.dirname(file),
-    `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`
-  );
-  try {
-    fs.writeFileSync(temp, content);
-    fs.renameSync(temp, file);
-  } catch (error) {
-    try {
-      if (fs.existsSync(temp)) fs.unlinkSync(temp);
-    } catch {
-      // Preserve the original write error.
-    }
-    throw error;
-  }
-}
-
-function writeWorkbenchJson(workbench, ref, value) {
-  const file = resolveSafeWorkbenchWritePath(workbench, ref);
-  atomicWriteText(file, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function appendWorkbenchText(workbench, ref, content) {
-  const file = resolveSafeWorkbenchWritePath(workbench, ref);
-  fs.appendFileSync(file, content, { encoding: 'utf8', mode: 0o600 });
-}
-
-function resolveSafeWorkbenchWritePath(workbench, ref) {
-  const value = String(ref || '').trim();
-  if (!value || path.isAbsolute(value) || path.win32.isAbsolute(value)) {
-    throw new Error(`Workbench output must be a relative path: ${ref || '-'}.`);
-  }
-
-  const root = path.resolve(workbench);
-  ensureDir(root);
-  const file = path.resolve(root, value);
-  if (file === root || !file.startsWith(`${root}${path.sep}`)) {
-    throw new Error(`Workbench output must stay inside the workbench: ${value}.`);
-  }
-
-  const relativeParent = path.relative(root, path.dirname(file));
-  let current = root;
-  for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
-    current = path.join(current, segment);
-    if (fs.existsSync(current)) {
-      const stat = fs.lstatSync(current);
-      if (stat.isSymbolicLink()) {
-        throw new Error(`Workbench output directory must not be a symlink: ${current}.`);
-      }
-      if (!stat.isDirectory()) {
-        throw new Error(`Workbench output parent is not a directory: ${current}.`);
-      }
-    } else {
-      fs.mkdirSync(current, { mode: 0o700 });
-    }
-  }
-
-  const realRoot = fs.realpathSync(root);
-  const realParent = fs.realpathSync(path.dirname(file));
-  if (realParent !== realRoot && !realParent.startsWith(`${realRoot}${path.sep}`)) {
-    throw new Error(`Workbench output directory resolves outside the workbench: ${value}.`);
-  }
-  if (fs.existsSync(file)) {
-    const stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink()) {
-      throw new Error(`Workbench output file must not be a symlink: ${value}.`);
-    }
-    if (!stat.isFile()) {
-      throw new Error(`Workbench output target is not a file: ${value}.`);
-    }
-  }
-  return file;
-}
-
-function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-}
-
 function now() {
   return new Date().toISOString();
 }
@@ -4929,6 +4111,8 @@ function printHelp() {
   node scripts/supermaestro.js status <workbench> [--json true]
   node scripts/supermaestro.js next <workbench> [--json true]
   node scripts/supermaestro.js resume <workbench> [--json true]
+  node scripts/supermaestro.js reopen-gate <workbench> --gate <scope|plan|review|final> --reason "<变更原因>"
+  node scripts/supermaestro.js recover-workbench <workbench>
   node scripts/supermaestro.js check-workbench <workbench>
   node scripts/supermaestro.js check-contracts <workbench> [--strict true]
   node scripts/supermaestro.js check-reviewability <workbench> [--strict true] [--json true]

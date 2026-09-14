@@ -2,6 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { atomicWriteText, withWorkbenchSession } = require('../../../scripts/workbench-store')
 
 function usage(exitCode = 1) {
   const text = `
@@ -87,20 +88,7 @@ function writeJson(filePath, value) {
 }
 
 function writeTextAtomic(filePath, content) {
-  ensureDir(path.dirname(filePath))
-  const tempPath = path.join(
-    path.dirname(filePath),
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
-  )
-  try {
-    fs.writeFileSync(tempPath, content, {
-      encoding: 'utf8',
-      mode: 0o600
-    })
-    fs.renameSync(tempPath, filePath)
-  } finally {
-    if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
-  }
+  atomicWriteText(filePath, content)
 }
 
 function writeWorkbenchText(workbench, relativePath, content) {
@@ -613,35 +601,39 @@ function main() {
   const dir = path.resolve(process.cwd(), requirementDir)
 
   try {
-    const report = buildInspection(dir, flags)
-    if (parseBoolean(flags['write-index'], false)) {
-      const indexPath = writeWorkbenchText(
-        dir,
-        path.join('specs', 'ui-material-index.md'),
-        renderIndex(report, dir)
-      )
-      report.summary.indexPath = indexPath
-    }
+    const primaryState = findPrimaryStatePath(dir)
+    const workbench = primaryState ? path.dirname(primaryState) : dir
+    withWorkbenchSession(workbench, { transactional: true }, () => {
+      const report = buildInspection(dir, flags)
+      if (parseBoolean(flags['write-index'], false)) {
+        const indexPath = writeWorkbenchText(
+          workbench,
+          path.join('specs', 'ui-material-index.md'),
+          renderIndex(report, dir)
+        )
+        report.summary.indexPath = indexPath
+      }
 
-    updatePrimaryState(dir, report)
+      updatePrimaryState(dir, report)
 
-    if (parseBoolean(flags.json, false)) {
-      console.log(JSON.stringify(report, null, 2))
-      return
-    }
+      if (parseBoolean(flags.json, false)) {
+        console.log(JSON.stringify(report, null, 2))
+        return
+      }
 
-    const { summary, warnings } = report
-    console.log(`UI manifest: ${summary.manifest}`)
-    console.log(`Boards: ${summary.total} total, ${summary.ok} ok, ${summary.schemaOnly} schema-only, ${summary.relocated} relocated, ${summary.missingFile} missing file, ${summary.missingPath} missing path, ${summary.imageUnreadable} image unreadable, ${summary.errored} errored`)
-    console.log(`Schema files found: ${summary.schemaFound}`)
-    console.log(`Image files found: ${summary.imageFound}`)
-    console.log(`Design widths: ${summary.designWidths.join(', ') || '-'}`)
-    console.log(`Image widths: ${summary.imageWidths.join(', ') || '-'}`)
-    if (summary.indexPath) console.log(`Wrote ${summary.indexPath}`)
-    if (warnings.length) {
-      console.log('Warnings:')
-      for (const warning of warnings) console.log(`  - ${warning}`)
-    }
+      const { summary, warnings } = report
+      console.log(`UI manifest: ${summary.manifest}`)
+      console.log(`Boards: ${summary.total} total, ${summary.ok} ok, ${summary.schemaOnly} schema-only, ${summary.relocated} relocated, ${summary.missingFile} missing file, ${summary.missingPath} missing path, ${summary.imageUnreadable} image unreadable, ${summary.errored} errored`)
+      console.log(`Schema files found: ${summary.schemaFound}`)
+      console.log(`Image files found: ${summary.imageFound}`)
+      console.log(`Design widths: ${summary.designWidths.join(', ') || '-'}`)
+      console.log(`Image widths: ${summary.imageWidths.join(', ') || '-'}`)
+      if (summary.indexPath) console.log(`Wrote ${summary.indexPath}`)
+      if (warnings.length) {
+        console.log('Warnings:')
+        for (const warning of warnings) console.log(`  - ${warning}`)
+      }
+    })
   } catch (error) {
     console.error(error.message)
     process.exit(error.exitCode || 1)
